@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, orderBy, query, runTransaction, serverTimestamp, updateDoc, where } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc, where } from 'firebase/firestore'
 import { auth, db } from './firebase'
 
 export const ALL_PERMISSIONS = ['view_subscriptions','manage_subscriptions','delete_subscriptions','review_requests','reject_requests','view_financial_reports','manage_users_roles','store_credentials','reveal_credentials','view_audit_log'] as const
@@ -48,6 +48,22 @@ export async function listRoles() { const { db } = requireContext(); return rows
 export async function listUsers() { const { db } = requireContext(); return rows<UserProfile>(await getDocs(collection(db,'users'))) }
 export async function listAuditLogs() { const { db } = requireContext(); return rows<AuditRecord>(await getDocs(query(collection(db,'audit_logs'),orderBy('created_at','desc')))) }
 export async function listNotifications() { const { db, user } = requireContext(); return rows<NotificationRecord>(await getDocs(query(collection(db,'notifications'),where('user_id','==',user.uid)))) }
+
+/** Keeps visible data fresh without manual refreshes. Restricted collections fail independently. */
+export function subscribeRealtime(onChange: (collectionName: string) => void) {
+  const { db, user } = requireContext()
+  const safeListen = (target: ReturnType<typeof collection> | ReturnType<typeof query>, name: string) =>
+    onSnapshot(target, () => onChange(name), () => undefined)
+  const unsubs = [
+    safeListen(collection(db, 'subscriptions'), 'subscriptions'),
+    safeListen(collection(db, 'subscription_requests'), 'requests'),
+    safeListen(collection(db, 'audit_logs'), 'audit'),
+    safeListen(collection(db, 'roles'), 'roles'),
+    safeListen(collection(db, 'users'), 'users'),
+    safeListen(query(collection(db, 'notifications'), where('user_id', '==', user.uid)), 'notifications'),
+  ]
+  return () => unsubs.forEach((unsubscribe) => unsubscribe())
+}
 
 export async function createSubscription(input: {name:string;category:string;price:number;billingCycle:string;renewalDate:string;accountEmail:string;accessUrl?:string;assignedTo:string[]}) { return secureAction('create_subscription',input) }
 export async function updateSubscription(subscriptionId:string,changes:Record<string,unknown>) { return secureAction('update_subscription',{subscriptionId,changes}) }

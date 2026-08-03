@@ -85,6 +85,7 @@ import {
   listMyRequests,
   listMySubscriptions,
   listNotifications,
+  subscribeRealtime,
   listRoles,
   listUsers,
   markNotificationRead,
@@ -2084,7 +2085,6 @@ function RequestDialog() {
                     notes: String(data.get("notes") ?? ""),
                     beneficiaryName: String(data.get("beneficiaryName") ?? "").trim(),
                     requestedPlan: String(data.get("requestedPlan") ?? "").trim(),
-                    requestedAccess: String(data.get("requestedAccess") ?? "").trim(),
                     accountEmail: String(data.get("accountEmail") ?? "").trim(),
                     accountPassword: String(data.get("accountPassword") ?? ""),
                   });
@@ -2346,11 +2346,13 @@ function Sidebar({
   close,
   permissions,
   isOwner,
+  pendingRequestCount,
 }: {
   open: boolean;
   close: () => void;
   permissions: string[];
   isOwner: boolean;
+  pendingRequestCount: number;
 }) {
   const workspace = useAppStore((s) => s.workspace),
     setWorkspace = useAppStore((s) => s.setWorkspace),
@@ -2392,6 +2394,7 @@ function Sidebar({
     >
       <item.icon size={19} />
       {item.label}
+      {item.id === "requests" && pendingRequestCount > 0 && <span className="nav-count" aria-label={`${pendingRequestCount} طلب جديد`}>{pendingRequestCount > 99 ? "99+" : pendingRequestCount}</span>}
     </button>
   );
   return (
@@ -2496,6 +2499,7 @@ function LoginScreen({ theme, onToggleTheme }: { theme: "light" | "dark"; onTogg
   );
 }
 export default function App() {
+  const queryClient = useQueryClient();
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("aait-theme");
     if (saved === "light" || saved === "dark") return saved;
@@ -2523,6 +2527,26 @@ export default function App() {
     [],
   );
   useEffect(() => {
+    if (!firebaseReady || !authenticated) return undefined;
+    try {
+      return subscribeRealtime((collectionName) => {
+        const queryKeys: Record<string, string[]> = {
+          subscriptions: ["all-subscriptions", "my-subscriptions"],
+          requests: ["all-requests", "my-requests"],
+          notifications: ["notifications"],
+          audit: ["audit"],
+          roles: ["roles"],
+          users: ["users"],
+        };
+        (queryKeys[collectionName] ?? []).forEach((queryKey) => {
+          void queryClient.invalidateQueries({ queryKey: [queryKey] });
+        });
+      });
+    } catch {
+      return undefined;
+    }
+  }, [authenticated, queryClient]);
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     document.querySelector('meta[name="theme-color"]')?.setAttribute(
@@ -2536,6 +2560,12 @@ export default function App() {
       !firebaseReady ? [...ALL_PERMISSIONS] : (profile?.permissions ?? []),
     [profile],
   );
+  const canSeeRequests = permissions.includes("review_requests") || permissions.includes("reject_requests");
+  const { data: sidebarRequests = [] } = useQuery({
+    queryKey: ["all-requests"],
+    queryFn: async () => (firebaseReady ? (await listAllRequests()).map(mapRequest) : requests),
+    enabled: firebaseReady && canSeeRequests,
+  });
   const adminViews = useMemo(
     () =>
       nav.filter(
@@ -2595,6 +2625,7 @@ export default function App() {
         close={() => setSidebarOpen(false)}
         permissions={permissions}
         isOwner={Boolean(profile?.is_owner)}
+        pendingRequestCount={sidebarRequests.filter((request) => request.status === "قيد المراجعة").length}
       />
       <div className="main-column">
         <Header

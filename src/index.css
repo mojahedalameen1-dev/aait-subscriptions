@@ -2353,6 +2353,12 @@ footer {
 .service-filter-list label.selected .filter-check { border-color: var(--primary); background: var(--primary); color: #fff; }
 .service-filter-list label.selected .filter-check svg { opacity: 1; }
 .filter-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px 17px; color: var(--muted); font-size: 10px; }
+.nav-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-inline-start: auto; padding-inline: 5px; border-radius: 999px; background: #f15f69; color: #fff; font-size: 10px; font-weight: 700; line-height: 1; box-shadow: 0 4px 12px #f15f6940; }
+
+/* The employee request no longer asks for a permission/access level. */
+.dialog-content:has(input[name="requestedAccess"]) label:has(input[name="requestedAccess"]) { display: none; }
+.dialog-content:has(input[name="accountEmail"]) label:has(input[name="accountEmail"]) { font-size: 0; }
+.dialog-content:has(input[name="accountEmail"]) label:has(input[name="accountEmail"])::before { content: "البريد الإلكتروني المرتبط بالخدمة"; display: block; margin-bottom: 7px; color: inherit; font-size: 12px; }
 .clear-filters { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--danger) 5%, var(--surface)); color: var(--danger); font-size: 10px; font-weight: 600; }
 .clear-filters svg { width: 14px; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; color: var(--muted); font-size: 11px; }
