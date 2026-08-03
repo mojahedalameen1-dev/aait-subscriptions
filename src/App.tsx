@@ -1189,7 +1189,7 @@ function RequestReviewDialog({
             {target?.beneficiaryName && <p><strong>المهندس المستفيد:</strong> {target.beneficiaryName}</p>}
             {target?.requestedPlan && <p><strong>الباقة المطلوبة:</strong> {target.requestedPlan}</p>}
             {target?.requestedAccess && <p><strong>الصلاحية المطلوبة:</strong> {target.requestedAccess}</p>}
-            {target?.proposedEmail && <p><strong>البريد المقترح:</strong> <span dir="ltr">{target.proposedEmail}</span></p>}
+            {target?.proposedEmail && <p><strong>البريد المرتبط بالخدمة:</strong> <span dir="ltr">{target.proposedEmail}</span></p>}
           </div>
           <form onSubmit={async (event) => {
             event.preventDefault();
@@ -1232,7 +1232,6 @@ function RequestReviewDialog({
                     <label>دورة الفوترة<select name="billingCycle" defaultValue="شهري"><option>شهري</option><option>ربع سنوي</option><option>نصف سنوي</option><option>سنوي</option><option>مرة واحدة</option></select></label>
                      {target?.type === "تجديد" && <label>بداية الفترة الجديدة <b>*</b><input name="renewalStartDate" type="date" required dir="ltr" defaultValue={target.suggestedStartDate} /></label>}
                      <label>تاريخ التجديد <b>*</b><input name="renewalDate" type="date" required dir="ltr" defaultValue={target?.suggestedRenewalDate} /></label>
-                     {target?.type === "اشتراك جديد" && <label>بريد حساب الخدمة<input name="accountEmail" type="email" dir="ltr" defaultValue={target.proposedEmail} /></label>}
                     <label>رابط الوصول <span>اختياري</span><input name="accessUrl" type="url" placeholder="https://" dir="ltr" /></label>
                   </div>
                 </fieldset>
@@ -2102,9 +2101,8 @@ function RequestDialog() {
             <ServicePicker name="service" label="اسم الخدمة المطلوبة" required />
             <div className="form-grid two-columns">
               <label>نوع الاشتراك أو الباقة <input name="requestedPlan" placeholder="مثال: Team أو Pro" /></label>
-              <label>الصلاحية المطلوبة <input name="requestedAccess" placeholder="مثال: Editor أو Full access" /></label>
               <label>اسم المهندس المستفيد <b>*</b><input name="beneficiaryName" required placeholder="اسم الموظف التابع لفريقك" /></label>
-              <label>البريد الإلكتروني المقترح <input name="accountEmail" type="email" dir="ltr" placeholder="name@company.com" /></label>
+              <label>البريد الإلكتروني المرتبط بالخدمة <input name="accountEmail" type="email" dir="ltr" placeholder="name@company.com" /></label>
             </div>
             <label>
               كلمة المرور المقترحة <span>اختياري</span>
