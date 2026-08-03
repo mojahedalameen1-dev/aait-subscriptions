@@ -1448,7 +1448,7 @@ function ReportsView() {
       const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
       doc.addFileToVFS("IBMPlexSansArabic-Regular.ttf", btoa(binary));
       doc.addFont("IBMPlexSansArabic-Regular.ttf", "IBMPlexArabic", "normal");
-      doc.setFont("IBMPlexArabic"); doc.setR2L(true);
+      doc.setFont("IBMPlexArabic");
       doc.setFillColor(16, 45, 62); doc.rect(0, 0, 297, 36, "F");
       doc.setTextColor(255, 255, 255); doc.setFontSize(20); doc.text("تقرير الاشتراكات والخدمات", 282, 15, { align: "right" });
       doc.setFontSize(9); doc.setTextColor(189, 220, 232); doc.text(`AAIT  |  الفترة: ${reportPeriod}`, 282, 25, { align: "right" });
