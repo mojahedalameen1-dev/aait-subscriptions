@@ -1156,6 +1156,15 @@ function Dashboard({ permissions }: { permissions: string[] }) {
     </>
   );
 }
+function calculateRenewalDate(startDate: string, cycle: string) {
+  if (!startDate || cycle === "مرة واحدة") return "";
+  const date = new Date(`${startDate}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  const months = cycle === "شهري" ? 1 : cycle === "ربع سنوي" ? 3 : cycle === "نصف سنوي" ? 6 : 12;
+  date.setMonth(date.getMonth() + months);
+  return date.toISOString().slice(0, 10);
+}
+
 function RequestReviewDialog({
   target,
   mode,
@@ -1171,6 +1180,22 @@ function RequestReviewDialog({
   const approving = mode === "approve";
   const suggestedCategory = findServiceBrand(target?.service ?? "")?.category ?? "خدمات أخرى";
   const today = new Date().toISOString().slice(0, 10);
+  const [startDate, setStartDate] = useState(today);
+  const [billingCycle, setBillingCycle] = useState("شهري");
+  const [renewalDate, setRenewalDate] = useState("");
+  const [manualRenewal, setManualRenewal] = useState(false);
+  useEffect(() => {
+    if (!target) return;
+    const initialStart = target.suggestedStartDate ?? today;
+    const initialCycle = "شهري";
+    setStartDate(initialStart);
+    setBillingCycle(initialCycle);
+    setRenewalDate(target.suggestedRenewalDate ?? calculateRenewalDate(initialStart, initialCycle));
+    setManualRenewal(Boolean(target.suggestedRenewalDate));
+  }, [target, target?.id, target?.suggestedStartDate, target?.suggestedRenewalDate, today]);
+  useEffect(() => {
+    if (!manualRenewal) setRenewalDate(calculateRenewalDate(startDate, billingCycle));
+  }, [startDate, billingCycle, manualRenewal]);
   return (
     <Dialog.Root open={Boolean(target)} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -1224,14 +1249,14 @@ function RequestReviewDialog({
             {approving ? (
               <>
                 <fieldset disabled={loading}>
-                  {target?.type !== "تجديد" && <label>تاريخ الاشتراك <b>*</b><input name="subscriptionStartDate" type="date" required dir="ltr" defaultValue={today} /></label>}
+                  {target?.type !== "تجديد" && <label>تاريخ الاشتراك <b>*</b><input name="subscriptionStartDate" type="date" required dir="ltr" value={startDate} onChange={(event) => { setStartDate(event.target.value); setManualRenewal(false); }} /></label>}
                   <legend>تفاصيل الاشتراك الناتج</legend>
                   <div className="form-grid two-columns">
                     <label>التكلفة بالريال <b>*</b><input name="cost" type="number" min="0" step="0.01" required dir="ltr" /></label>
                      <label>التصنيف<select name="category" defaultValue={suggestedCategory}><option>برمجيات وإنتاجية</option><option>استضافة وبنية تحتية</option><option>تصميم وتسويق</option><option>أمن وحماية</option><option>خدمات أخرى</option></select></label>
-                    <label>دورة الفوترة<select name="billingCycle" defaultValue="شهري"><option>شهري</option><option>ربع سنوي</option><option>نصف سنوي</option><option>سنوي</option><option>مرة واحدة</option></select></label>
+                      <label>دورة الفوترة<select name="billingCycle" value={billingCycle} onChange={(event) => { setBillingCycle(event.target.value); setManualRenewal(false); }}><option>شهري</option><option>ربع سنوي</option><option>نصف سنوي</option><option>سنوي</option><option>مرة واحدة</option></select></label>
                      {target?.type === "تجديد" && <label>بداية الفترة الجديدة <b>*</b><input name="renewalStartDate" type="date" required dir="ltr" defaultValue={target.suggestedStartDate} /></label>}
-                     <label>تاريخ التجديد <b>*</b><input name="renewalDate" type="date" required dir="ltr" defaultValue={target?.suggestedRenewalDate} /></label>
+                      <label>التجديد القادم <b>*</b><input name="renewalDate" type="date" required={billingCycle !== "مرة واحدة"} dir="ltr" value={renewalDate} onChange={(event) => { setRenewalDate(event.target.value); setManualRenewal(true); }} /><small className="calculated-field-note">{manualRenewal ? "تم تعديل التاريخ يدويًا" : "محسوب تلقائيًا من تاريخ البداية والدورة"}</small></label>
                     <label>رابط الوصول <span>اختياري</span><input name="accessUrl" type="url" placeholder="https://" dir="ltr" /></label>
                   </div>
                 </fieldset>

@@ -2354,6 +2354,7 @@ footer {
 .service-filter-list label.selected .filter-check svg { opacity: 1; }
 .filter-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px 17px; color: var(--muted); font-size: 10px; }
 .nav-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-inline-start: auto; padding-inline: 5px; border-radius: 999px; background: #f15f69; color: #fff; font-size: 10px; font-weight: 700; line-height: 1; box-shadow: 0 4px 12px #f15f6940; }
+.calculated-field-note { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; font-weight: 400; }
 
 /* The employee request no longer asks for a permission/access level. */
 .dialog-content:has(input[name="requestedAccess"]) label:has(input[name="requestedAccess"]) { display: none; }
