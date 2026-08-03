@@ -116,6 +116,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const purpose = String(payload.purpose ?? "").trim();
       if (!serviceName || !purpose)
         throw new Error("اسم الخدمة والغاية مطلوبان");
+      const beneficiaryName = String(payload.beneficiaryName ?? "").trim();
+      if (type === "new" && !beneficiaryName)
+        throw new Error("اسم المهندس المستفيد مطلوب");
+      const proposedEmail = String(payload.accountEmail ?? "").trim();
+      const proposedPassword = String(payload.accountPassword ?? "");
+      const proposedCredential = proposedEmail || proposedPassword
+        ? encrypt(JSON.stringify({ username: proposedEmail, password: proposedPassword }))
+        : null;
       const requestRef = db.collection("subscription_requests").doc();
       const requestData = {
         type,
@@ -124,8 +132,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         notes: String(payload.notes ?? ""),
         related_subscription_id:
           type === "renewal" ? String(payload.subscriptionId ?? "") : null,
+        suggested_start_date: type === "renewal" ? String(payload.suggestedStartDate ?? "") : "",
+        suggested_renewal_date: type === "renewal" ? String(payload.suggestedRenewalDate ?? "") : "",
         requested_by: authUser.uid,
         requester_name: profile.name ?? authUser.email,
+        beneficiary_name: beneficiaryName,
+        requested_plan: String(payload.requestedPlan ?? "").trim(),
+        requested_access: String(payload.requestedAccess ?? "").trim(),
+        proposed_account_email: proposedEmail,
+        proposed_credential: proposedCredential,
+        has_proposed_credentials: Boolean(proposedCredential),
         status: "قيد المراجعة",
         reviewed_by: null,
         reviewed_at: null,
@@ -145,14 +161,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             !subscription.data()?.assigned_to?.includes(authUser.uid)
           )
             throw new Error("الاشتراك غير مسند لك");
+          const existingRenewal = await tx.get(
+            db.collection("subscription_requests").where("related_subscription_id", "==", requestData.related_subscription_id).where("type", "==", "renewal").where("status", "==", "قيد المراجعة").limit(1),
+          );
+          if (!existingRenewal.empty) throw new Error("يوجد طلب تجديد مفتوح لهذا الاشتراك");
         }
         tx.create(requestRef, requestData);
         reviewers.docs.forEach((reviewer) =>
           tx.create(db.collection("notifications").doc(), {
             user_id: reviewer.id,
             title: type === "renewal" ? "طلب تجديد جديد" : "طلب اشتراك جديد",
-            body: `${profile.name ?? authUser.email}: ${serviceName}`,
+            body: `${profile.name ?? authUser.email}: ${serviceName}${beneficiaryName ? ` · للمهندس ${beneficiaryName}` : ""}`,
             read: false,
+            priority: "high",
             request_id: requestRef.id,
             created_at: FieldValue.serverTimestamp(),
           }),
@@ -225,17 +246,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           );
           const existing = await tx.get(existingRef);
           if (!existing.exists) throw new Error("الاشتراك الأصلي غير موجود");
-          tx.update(existingRef, {
+          const previous = existing.data()!;
+          const renewalRef = db.collection("subscriptions").doc();
+          tx.create(renewalRef, {
+            ...previous,
             renewal_date: renewalDate,
+            start_date: payload.renewalStartDate ? Timestamp.fromDate(new Date(String(payload.renewalStartDate))) : FieldValue.serverTimestamp(),
             status: "نشط",
-            updated_by: authUser.uid,
+            renewal_of: existingRef.id,
+            renewal_count: Number(previous.renewal_count ?? 0) + 1,
+            created_by: authUser.uid,
+            created_at: FieldValue.serverTimestamp(),
             updated_at: FieldValue.serverTimestamp(),
           });
           tx.update(requestRef, {
             status: "مكتمل",
             reviewed_by: authUser.uid,
             reviewed_at: FieldValue.serverTimestamp(),
-            resulting_subscription_id: existingRef.id,
+            resulting_subscription_id: renewalRef.id,
           });
           tx.create(db.collection("audit_logs").doc(), {
             action: "موافقة على تجديد",
@@ -245,7 +273,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             actor_uid: authUser.uid,
             actor_name: profile.name ?? authUser.email,
             details: data.service_name,
-            summary: `تمت الموافقة على تجديد اشتراك «${String(data.service_name ?? "اشتراك")}» حتى ${renewalDate.toDate().toLocaleDateString("en-GB")}.`,
+            summary: `تمت الموافقة على تجديد اشتراك «${String(data.service_name ?? "اشتراك")}» حتى ${renewalDate.toDate().toLocaleDateString("en-CA").replaceAll("-", "/")}.`,
             created_at: FieldValue.serverTimestamp(),
           });
           tx.create(db.collection("notifications").doc(), {
@@ -253,6 +281,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             title: "تمت الموافقة على التجديد",
             body: data.service_name,
             read: false,
+            priority: "high",
+            created_at: FieldValue.serverTimestamp(),
+          });
+          tx.create(db.collection("notifications").doc(), {
+            user_id: data.requested_by,
+            title: "تم تجديد الاشتراك",
+            body: `${data.service_name} · أصبحت فترة الاشتراك الجديدة متاحة في اشتراكاتك`,
+            subscription_id: renewalRef.id,
+            read: false,
+            priority: "high",
             created_at: FieldValue.serverTimestamp(),
           });
           return;
@@ -270,6 +308,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             Array.isArray(payload.assignedTo) && payload.assignedTo.length
               ? payload.assignedTo
               : [data.requested_by],
+          team_lead_uid: data.requested_by,
+          team_lead_name: data.requester_name ?? "",
+          beneficiary_name: String(data.beneficiary_name ?? ""),
+          requested_plan: String(data.requested_plan ?? ""),
           status: "نشط",
           has_stored_credentials: false,
           created_by: authUser.uid,
@@ -278,6 +320,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           updated_at: FieldValue.serverTimestamp(),
         };
         tx.create(subscriptionRef, subscription);
+        if (data.proposed_credential) {
+          tx.set(db.doc(`credentials/${subscriptionRef.id}`), {
+            ...data.proposed_credential,
+            updated_by: authUser.uid,
+            updated_at: FieldValue.serverTimestamp(),
+          });
+          tx.update(subscriptionRef, { has_stored_credentials: true });
+        }
         tx.update(requestRef, {
           status: "مكتمل",
           reviewed_by: authUser.uid,
@@ -304,6 +354,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           access_url: String(payload.accessUrl ?? ""),
           subscription_id: subscriptionRef.id,
           read: false,
+          priority: "high",
           created_at: FieldValue.serverTimestamp(),
         });
       });

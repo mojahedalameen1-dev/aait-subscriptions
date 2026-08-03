@@ -2220,6 +2220,29 @@ footer {
 .service-picker-custom { grid-column: 1/-1; padding: 13px; color: var(--muted); font-size: 10px; text-align: center; }
 .request-service > .service-logo { margin-left: 0; }
 
+.report-export-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.report-filters, .audit-filters { margin-bottom: 18px; }
+.report-filters .panel-head h2, .dashboard-notifications h2 { display: flex; align-items: center; gap: 8px; }
+.service-filter-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.service-filter-list label { padding: 8px 11px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; cursor: pointer; background: var(--card); }
+.service-filter-list input { accent-color: var(--primary); }
+.pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; color: var(--muted); font-size: 11px; }
+.dashboard-notifications { margin-bottom: 20px; }
+.dashboard-notification-list { display: grid; gap: 8px; }
+.dashboard-notification { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 11px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); color: inherit; text-align: right; font: inherit; cursor: pointer; }
+.dashboard-notification:hover { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, var(--card)); }
+.dashboard-notification > svg { width: 18px; color: var(--primary); flex: 0 0 auto; }
+.dashboard-notification.important { border-right: 3px solid #f5a623; }
+.dashboard-notification span { display: grid; gap: 3px; }
+.dashboard-notification strong { font-size: 11px; }.dashboard-notification small { color: var(--muted); font-size: 10px; }
+.notifications-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 7px 10px; border-bottom: 1px solid var(--border); }
+.notifications-head h3 { margin: 0; }.notifications-head h3 small { color: var(--primary); font-size: 9px; margin-right: 5px; }
+.notifications-head > div { display: flex; gap: 4px; }.compact-icon { width: 28px; height: 28px; }.compact-icon svg { width: 15px; }
+.notifications [role="menuitem"].unread { background: color-mix(in srgb, var(--primary) 8%, var(--card)); }.notifications [role="menuitem"].important { border-right: 3px solid #f5a623; }
+.renewal-period { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: #edf9fc; color: #26738a; font-size: 11px; }
+
+[data-theme="dark"] .service-filter-list label, [data-theme="dark"] .dashboard-notification { background: var(--card); }
+
 @media (max-width: 760px) {
   .header-context { display: none; }
   .subscription-dialog { width: calc(100vw - 16px); max-height: 94vh; }
@@ -2237,4 +2260,5 @@ footer {
   .review-actions { width: 100%; justify-content: flex-end; }
   .toolbar { align-items: stretch; gap: 10px; flex-direction: column; }
   .filter-select { justify-content: space-between; }
+  .report-export-actions { width: 100%; }.report-export-actions .btn { flex: 1; }
 }

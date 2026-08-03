@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,6 +7,7 @@ import {
   Activity,
   Bell,
   CalendarDays,
+  CheckCheck,
   Check,
   ChevronLeft,
   CircleDollarSign,
@@ -16,6 +17,9 @@ import {
   Gauge,
   Eye,
   EyeOff,
+  FileSpreadsheet,
+  FileText,
+  Filter,
   LockKeyhole,
   LogOut,
   Menu,
@@ -27,10 +31,13 @@ import {
   Sparkles,
   Sun,
   Trash2,
+  Volume2,
+  VolumeX,
   Users,
   WalletCards,
   X,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import {
   Area,
   AreaChart,
@@ -78,6 +85,7 @@ import {
   listRoles,
   listUsers,
   markNotificationRead,
+  markAllNotificationsRead,
   grantSystemOwner,
   rejectRequest,
   revealCredential,
@@ -108,6 +116,11 @@ type Subscription = {
   category?: string;
   assignedTo: string[];
   renewalDate: string;
+  teamLeadName?: string;
+  beneficiaryName?: string;
+  requestedPlan?: string;
+  renewalOf?: string;
+  renewalCount?: number;
 };
 type RequestItem = {
   id: string | number;
@@ -118,6 +131,12 @@ type RequestItem = {
   type: "اشتراك جديد" | "تجديد";
   status: RequestStatus;
   rejectionReason?: string;
+  beneficiaryName?: string;
+  requestedPlan?: string;
+  requestedAccess?: string;
+  proposedEmail?: string;
+  suggestedStartDate?: string;
+  suggestedRenewalDate?: string;
 };
 
 const subscriptions: Subscription[] = [];
@@ -145,8 +164,8 @@ const formatSAR = (value: number) =>
 const colors = ["#2ac0eb", "#7357ff", "#10a37f", "#d97757", "#d50c2d"];
 const daysUntil = (date?: Date) =>
   date ? Math.ceil((date.getTime() - Date.now()) / 86400000) : 0;
-const dateText = (date?: { toDate(): Date }) =>
-  date?.toDate().toLocaleDateString("en-GB") ?? "الآن";
+const formatDate = (date?: Date) => date ? date.toLocaleDateString("en-CA").replaceAll("-", "/") : "الآن";
+const dateText = (date?: { toDate(): Date }) => formatDate(date?.toDate());
 const mapSubscription = (item: SubscriptionRecord, index = 0): Subscription => {
   const renewal = item.renewal_date?.toDate();
   const days = daysUntil(renewal);
@@ -165,7 +184,7 @@ const mapSubscription = (item: SubscriptionRecord, index = 0): Subscription => {
     color: colors[index % colors.length],
     price: Number(item.price ?? 0),
     cycle: item.billing_cycle ?? "شهري",
-    renewal: renewal?.toLocaleDateString("en-GB") ?? "غير محدد",
+    renewal: renewal ? formatDate(renewal) : "غير محدد",
     days,
     status,
     email: item.account_email ?? "حساب الشركة",
@@ -174,6 +193,11 @@ const mapSubscription = (item: SubscriptionRecord, index = 0): Subscription => {
     category: item.category,
     assignedTo: item.assigned_to ?? [],
     renewalDate: renewal?.toISOString().slice(0, 10) ?? "",
+    teamLeadName: item.team_lead_name,
+    beneficiaryName: item.beneficiary_name,
+    requestedPlan: item.requested_plan,
+    renewalOf: item.renewal_of,
+    renewalCount: item.renewal_count,
   };
 };
 const mapRequest = (item: RequestRecord): RequestItem => ({
@@ -185,6 +209,12 @@ const mapRequest = (item: RequestRecord): RequestItem => ({
   type: item.type === "renewal" ? "تجديد" : "اشتراك جديد",
   status: item.status,
   rejectionReason: item.rejection_reason,
+  beneficiaryName: item.beneficiary_name,
+  requestedPlan: item.requested_plan,
+  requestedAccess: item.requested_access,
+  proposedEmail: item.proposed_account_email,
+  suggestedStartDate: item.suggested_start_date,
+  suggestedRenewalDate: item.suggested_renewal_date,
 });
 const permissionForView: Partial<Record<View, string>> = {
   dashboard: "view_subscriptions",
@@ -730,11 +760,12 @@ function SubscriptionCard({
           </small>
         </div>
       </div>
+      {(item.teamLeadName || item.beneficiaryName) && <div className="subscription-people"><span>قائد الفريق: <strong>{item.teamLeadName ?? "—"}</strong></span><span>المهندس المستفيد: <strong>{item.beneficiaryName ?? "—"}</strong></span></div>}
       {secret && <p className="credential-value">{secret}</p>}
       <div className="card-actions">
         <button
           className="btn secondary"
-          onClick={() => setRenewalTarget(`${item.id}|${item.name}`)}
+          onClick={() => setRenewalTarget(`${item.id}|${item.name}|${item.renewalDate}`)}
         >
           <RefreshCw size={16} /> طلب تجديد
         </button>
@@ -920,6 +951,7 @@ function EmployeeDashboard() {
 }
 
 function Dashboard({ permissions }: { permissions: string[] }) {
+  const queryClient = useQueryClient();
   const { data: items = subscriptions } = useQuery({
     queryKey: ["all-subscriptions"],
     queryFn: async () =>
@@ -935,6 +967,11 @@ function Dashboard({ permissions }: { permissions: string[] }) {
       !firebaseReady ||
       permissions.includes("review_requests") ||
       permissions.includes("reject_requests"),
+  });
+  const { data: notifications = [] } = useQuery({
+    queryKey: ["notifications"],
+    queryFn: listNotifications,
+    enabled: firebaseReady,
   });
   const monthlyTotal = Math.round(
     items.reduce(
@@ -1004,6 +1041,13 @@ function Dashboard({ permissions }: { permissions: string[] }) {
           trend="بحاجة إلى مراجعة"
           tone="violet"
         />
+      </section>
+      <section className="panel dashboard-notifications">
+        <div className="panel-head"><div><h2><Bell /> تنبيهات تحتاج إلى متابعة</h2><p>أحدث التنبيهات المهمة وغير المقروءة.</p></div><button className="text-btn" onClick={() => document.querySelector<HTMLButtonElement>(".bell")?.click()}>فتح مركز التنبيهات <ChevronLeft size={16} /></button></div>
+        <div className="dashboard-notification-list">
+          {notifications.filter((item) => !item.read).sort((a,b) => Number(b.created_at?.toDate() ?? 0) - Number(a.created_at?.toDate() ?? 0)).slice(0, 4).map((item) => <button key={item.id} className={cn("dashboard-notification", item.priority === "high" && "important")} onClick={async () => { await markNotificationRead(item.id); await queryClient.invalidateQueries({queryKey:["notifications"]}); if (item.request_id) useAppStore.getState().setView("requests"); else if (item.subscription_id) useAppStore.getState().setView("subscriptions"); }}><Bell /><span><strong>{item.title}</strong><small>{item.body}</small></span></button>)}
+          {!notifications.some((item) => !item.read) && <div className="inline-empty">لا توجد تنبيهات جديدة تحتاج إلى إجراء.</div>}
+        </div>
       </section>
       <section className="dashboard-grid">
         <article className="panel chart-panel">
@@ -1136,6 +1180,10 @@ function RequestReviewDialog({
           <div className="request-review-summary">
             <span>الغرض من الطلب</span>
             <p>{target?.purpose}</p>
+            {target?.beneficiaryName && <p><strong>المهندس المستفيد:</strong> {target.beneficiaryName}</p>}
+            {target?.requestedPlan && <p><strong>الباقة المطلوبة:</strong> {target.requestedPlan}</p>}
+            {target?.requestedAccess && <p><strong>الصلاحية المطلوبة:</strong> {target.requestedAccess}</p>}
+            {target?.proposedEmail && <p><strong>البريد المقترح:</strong> <span dir="ltr">{target.proposedEmail}</span></p>}
           </div>
           <form onSubmit={async (event) => {
             event.preventDefault();
@@ -1147,9 +1195,10 @@ function RequestReviewDialog({
                 await approveRequest(String(target.id), {
                   cost: Number(form.get("cost")),
                   billingCycle: String(form.get("billingCycle") ?? "شهري"),
+                  renewalStartDate: String(form.get("renewalStartDate") ?? ""),
                   renewalDate: String(form.get("renewalDate") ?? ""),
                   category: String(form.get("category") ?? "خدمات أخرى"),
-                  accountEmail: String(form.get("accountEmail") ?? "").trim(),
+                  accountEmail: String(form.get("accountEmail") ?? target.proposedEmail ?? "").trim(),
                   accessUrl: String(form.get("accessUrl") ?? "").trim(),
                 });
               } else {
@@ -1175,12 +1224,13 @@ function RequestReviewDialog({
                     <label>التكلفة بالريال <b>*</b><input name="cost" type="number" min="0" step="0.01" required dir="ltr" /></label>
                     <label>التصنيف<select name="category" defaultValue="خدمات أخرى"><option>برمجيات وإنتاجية</option><option>استضافة وبنية تحتية</option><option>تصميم وتسويق</option><option>أمن وحماية</option><option>خدمات أخرى</option></select></label>
                     <label>دورة الفوترة<select name="billingCycle" defaultValue="شهري"><option>شهري</option><option>ربع سنوي</option><option>نصف سنوي</option><option>سنوي</option><option>مرة واحدة</option></select></label>
-                    <label>تاريخ التجديد <b>*</b><input name="renewalDate" type="date" required dir="ltr" /></label>
-                    {target?.type === "اشتراك جديد" && <label>بريد حساب الخدمة<input name="accountEmail" type="email" dir="ltr" /></label>}
+                     {target?.type === "تجديد" && <label>بداية الفترة الجديدة <b>*</b><input name="renewalStartDate" type="date" required dir="ltr" defaultValue={target.suggestedStartDate} /></label>}
+                     <label>تاريخ التجديد <b>*</b><input name="renewalDate" type="date" required dir="ltr" defaultValue={target?.suggestedRenewalDate} /></label>
+                     {target?.type === "اشتراك جديد" && <label>بريد حساب الخدمة<input name="accountEmail" type="email" dir="ltr" defaultValue={target.proposedEmail} /></label>}
                     <label>رابط الوصول <span>اختياري</span><input name="accessUrl" type="url" placeholder="https://" dir="ltr" /></label>
                   </div>
                 </fieldset>
-                <div className="security-note"><Users /> سيُسند الاشتراك تلقائيًا إلى الموظف مقدم الطلب.</div>
+                <div className="security-note"><Users /> سيُربط الاشتراك بقائد الفريق مقدم الطلب، ويُحفظ اسم المهندس المستفيد ضمن تفاصيله.</div>
               </>
             ) : (
               <label>سبب الرفض <b>*</b><textarea name="reason" required minLength={5} rows={4} placeholder="وضّح للموظف سبب الرفض وما المطلوب لتقديم طلب أفضل..." autoFocus /></label>
@@ -1234,13 +1284,12 @@ function RequestsView({ permissions }: { permissions: string[] }) {
         {shown.length ? (
           shown.map((r) => (
             <article className="request-row" key={r.id}>
-              <div className="request-id">#{String(r.id).slice(-6)}</div>
-              <div className="request-main">
+               <div className="request-main">
                 <div>
                   <h3>{r.service}</h3>
                   <p>{r.purpose}</p>
                 </div>
-                <div className="request-details">
+                 <div className="request-details">
                   <span>
                     <Users size={15} />
                     {r.requester}
@@ -1249,7 +1298,9 @@ function RequestsView({ permissions }: { permissions: string[] }) {
                     <CalendarDays size={15} />
                     {r.date}
                   </span>
-                  <span>{r.type}</span>
+                   <span>{r.type}</span>
+                   {r.beneficiaryName && <span>المهندس: {r.beneficiaryName}</span>}
+                   {r.requestedPlan && <span>الباقة: {r.requestedPlan}</span>}
                 </div>
                 {r.rejectionReason && (
                   <small className="urgent">
@@ -1292,6 +1343,9 @@ function RequestsView({ permissions }: { permissions: string[] }) {
   );
 }
 function ReportsView() {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const { data: items = subscriptions } = useQuery({
     queryKey: ["all-subscriptions"],
     queryFn: async () =>
@@ -1299,8 +1353,13 @@ function ReportsView() {
         ? (await listAllSubscriptions()).map(mapSubscription)
         : subscriptions,
   });
+  const availableServices = useMemo(() => [...new Set(items.map((item) => item.name))].sort(), [items]);
+  const filteredItems = useMemo(() => items.filter((item) => {
+    const date = item.renewalDate;
+    return (!selectedServices.length || selectedServices.includes(item.name)) && (!from || date >= from) && (!to || date <= to);
+  }), [items, selectedServices, from, to]);
   const monthly = Math.round(
-    items.reduce(
+    filteredItems.reduce(
       (sum, item) =>
         sum +
         item.price /
@@ -1309,20 +1368,46 @@ function ReportsView() {
     ),
   );
   const annual = monthly * 12;
-  const average = items.length ? Math.round(monthly / items.length) : 0;
-  const activeCount = items.filter((x) => x.status === "نشط").length;
-  const nearCount = items.filter(
+  const average = filteredItems.length ? Math.round(monthly / filteredItems.length) : 0;
+  const activeCount = filteredItems.filter((x) => x.status === "نشط").length;
+  const nearCount = filteredItems.filter(
     (x) => x.status === "قارب على الانتهاء",
   ).length;
-  const expiredCount = items.filter((x) => x.status === "منتهٍ").length;
-  const canceledCount = items.filter((x) => x.status === "ملغى").length;
+  const expiredCount = filteredItems.filter((x) => x.status === "منتهٍ").length;
+  const canceledCount = filteredItems.filter((x) => x.status === "ملغى").length;
   const reportData = monthlySeries(monthly);
+  const exportExcel = () => {
+    const summary = [["تقرير اشتراكات AAIT"], ["الفترة", `${from || "البداية"} — ${to || "اليوم"}`], ["إجمالي المصروفات الشهرية", monthly], ["الإجمالي السنوي المتوقع", annual], [], ["الخدمة", "التكلفة", "الدورة", "تاريخ التجديد", "الحالة", "قائد الفريق", "المهندس المستفيد"]];
+    filteredItems.forEach((item) => summary.push([item.name, item.price, item.cycle, item.renewal, item.status, item.teamLeadName ?? "—", item.beneficiaryName ?? "—"]));
+    const ws = XLSX.utils.aoa_to_sheet(summary);
+    ws["!views"] = [{ rightToLeft: true }];
+    ws["!cols"] = [20, 14, 16, 16, 16, 22, 22].map((wch) => ({ wch }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, ws, "التقرير");
+    XLSX.writeFile(workbook, `تقرير-الاشتراكات-${from || "كامل"}-${to || "الحالي"}.xlsx`);
+  };
+  const exportPdf = () => {
+    const rows = filteredItems.map((item) => `<tr><td>${item.name}</td><td>${formatSAR(item.price)}</td><td>${item.cycle}</td><td>${item.renewal}</td><td>${item.status}</td><td>${item.teamLeadName ?? "—"}</td><td>${item.beneficiaryName ?? "—"}</td></tr>`).join("");
+    const popup = window.open("", "_blank", "noopener,noreferrer");
+    if (!popup) return toast.error("اسمح للنظام بفتح نافذة الطباعة لتصدير PDF");
+    popup.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير الاشتراكات</title><style>body{font-family:'IBM Plex Sans Arabic',Arial,sans-serif;color:#102d3e;padding:34px}h1{margin:0;color:#0b8db4}p{color:#587080}.cards{display:flex;gap:12px;margin:24px 0}.card{border:1px solid #dbe7ec;border-radius:12px;padding:14px;min-width:160px}.card b{display:block;font-size:20px;margin-top:6px}table{width:100%;border-collapse:collapse;margin-top:22px;font-size:12px}th{background:#0d3142;color:#fff}th,td{padding:10px;border:1px solid #dbe7ec;text-align:right}@media print{body{padding:0}}</style></head><body><h1>تقرير الاشتراكات</h1><p>الفترة: ${from || "بداية السجل"} — ${to || "اليوم"}</p><div class="cards"><div class="card">الإنفاق الشهري<b>${formatSAR(monthly)}</b></div><div class="card">الإجمالي السنوي<b>${formatSAR(annual)}</b></div><div class="card">عدد الاشتراكات<b>${filteredItems.length}</b></div></div><table><thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>التجديد</th><th>الحالة</th><th>قائد الفريق</th><th>المهندس المستفيد</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>لا توجد بيانات ضمن الفلاتر الحالية</td></tr>"}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`);
+    popup.document.close();
+  };
   return (
     <>
       <PageTitle
         title="التقارير المالية"
         subtitle="رؤية واضحة لتكاليف الخدمات والاتجاهات"
+        action={<div className="report-export-actions"><button className="btn secondary" onClick={exportExcel}><FileSpreadsheet /> تصدير Excel</button><button className="btn primary" onClick={exportPdf}><FileText /> تصدير PDF</button></div>}
       />
+      <section className="panel report-filters">
+        <div className="panel-head"><div><h2><Filter /> تصفية التقرير</h2><p>اختر الخدمات التي لها اشتراكات فعلية وحدد الفترة المطلوبة.</p></div></div>
+        <div className="form-grid two-columns">
+          <label>من تاريخ <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} dir="ltr" /></label>
+          <label>إلى تاريخ <input type="date" value={to} onChange={(event) => setTo(event.target.value)} dir="ltr" /></label>
+        </div>
+        <div className="service-filter-list">{availableServices.map((service) => <label key={service}><input type="checkbox" checked={selectedServices.includes(service)} onChange={(event) => setSelectedServices((current) => event.target.checked ? [...current, service] : current.filter((value) => value !== service))} /> {service}</label>)}</div>
+      </section>
       <section className="metrics-grid">
         <Metric
           icon={CircleDollarSign}
@@ -1340,7 +1425,7 @@ function ReportsView() {
         <Metric
           icon={Activity}
           title="حالات الاشتراكات"
-          value={String(items.length)}
+          value={String(filteredItems.length)}
           trend={`نشط ${activeCount} · قريب ${nearCount} · منتهٍ ${expiredCount} · ملغى ${canceledCount}`}
           tone="orange"
         />
@@ -1628,6 +1713,12 @@ function RolesView({ canGrantOwner }: { canGrantOwner: boolean }) {
   );
 }
 function AuditView() {
+  const [queryText, setQueryText] = useState("");
+  const [actionFilter, setActionFilter] = useState("الكل");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
   const { data: events = [] } = useQuery({
     queryKey: ["audit"],
     queryFn: listAuditLogs,
@@ -1640,6 +1731,14 @@ function AuditView() {
     if (candidate && !candidate.includes(",") && candidate !== event.entity_id)
       knownEntityNames.set(event.entity_id, candidate);
   });
+  const actions = ["الكل", ...new Set(events.map((event) => event.action))];
+  const filteredEvents = events.filter((event) => {
+    const text = `${event.action} ${event.entity_name ?? ""} ${event.actor_name ?? ""} ${event.summary ?? ""}`.toLowerCase();
+    const date = event.created_at?.toDate().toISOString().slice(0, 10) ?? "";
+    return (actionFilter === "الكل" || event.action === actionFilter) && (!queryText || text.includes(queryText.toLowerCase())) && (!from || date >= from) && (!to || date <= to);
+  });
+  const pages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
+  const visibleEvents = filteredEvents.slice((Math.min(page, pages) - 1) * pageSize, Math.min(page, pages) * pageSize);
   const actionPresentation = (action: string) => {
     if (action.includes("حذف")) return { icon: Trash2, tone: "danger", label: action.replace("بيانات اعتماد", "بيانات الدخول") };
     if (action.includes("إظهار") || action.includes("عرض")) return { icon: Eye, tone: "warning", label: "عرض بيانات الدخول" };
@@ -1656,9 +1755,18 @@ function AuditView() {
         title="سجل التحركات"
         subtitle="تفاصيل واضحة لكل إجراء: ماذا حدث، وعلى أي عنصر، ومن نفّذه ومتى"
       />
+      <section className="panel audit-filters">
+        <div className="form-grid two-columns">
+          <label>بحث <input value={queryText} onChange={(event) => { setQueryText(event.target.value); setPage(1); }} placeholder="الخدمة أو المستخدم أو وصف الإجراء" /></label>
+          <label>نوع الإجراء <select value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }}>{actions.map((action) => <option key={action}>{action}</option>)}</select></label>
+          <label>من تاريخ <input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} dir="ltr" /></label>
+          <label>إلى تاريخ <input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} dir="ltr" /></label>
+        </div>
+        <button className="text-btn" onClick={() => { setQueryText(""); setActionFilter("الكل"); setFrom(""); setTo(""); setPage(1); }}>مسح الفلاتر</button>
+      </section>
       <div className="activity-log">
-        {events.length ? (
-          events.map((event) => {
+        {visibleEvents.length ? (
+          visibleEvents.map((event) => {
             const presentation = actionPresentation(event.action);
             const Icon = presentation.icon;
             const entityName = event.entity_name || knownEntityNames.get(event.entity_id);
@@ -1676,11 +1784,11 @@ function AuditView() {
                   </p>
                   <div className="activity-meta">
                     <span><Users /> نفّذها: <strong>{event.actor_name ?? "النظام"}</strong></span>
-                    <span className="entity-id" title={event.entity_id}>المعرّف: {event.entity_id}</span>
+                    {entityName && <span>العنصر: <strong>{entityName}</strong></span>}
                   </div>
                 </div>
                 <time>
-                  <strong>{createdAt?.toLocaleDateString("en-GB") ?? "الآن"}</strong>
+                  <strong>{formatDate(createdAt)}</strong>
                   <span>{createdAt?.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) ?? ""}</span>
                 </time>
               </article>
@@ -1690,6 +1798,7 @@ function AuditView() {
           <article className="empty-state">لا توجد تحركات مسجلة بعد</article>
         )}
       </div>
+      {filteredEvents.length > pageSize && <nav className="pagination" aria-label="صفحات سجل التحركات"><button className="btn secondary compact" disabled={page === 1} onClick={() => setPage((current) => current - 1)}>السابق</button><span>صفحة {Math.min(page, pages)} من {pages}</span><button className="btn secondary compact" disabled={page >= pages} onClick={() => setPage((current) => current + 1)}>التالي</button></nav>}
     </>
   );
 }
@@ -1838,6 +1947,7 @@ function NewRequestButton() {
 function RequestDialog() {
   const open = useAppStore((s) => s.requestOpen),
     setOpen = useAppStore((s) => s.setRequestOpen);
+  const [loading, setLoading] = useState(false);
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
@@ -1855,21 +1965,39 @@ function RequestDialog() {
             onSubmit={async (e) => {
               e.preventDefault();
               const data = new FormData(e.currentTarget);
+              setLoading(true);
               try {
                 if (firebaseReady)
                   await createSubscriptionRequest({
                     service_name: String(data.get("service")),
                     purpose: String(data.get("purpose")),
                     notes: String(data.get("notes") ?? ""),
+                    beneficiaryName: String(data.get("beneficiaryName") ?? "").trim(),
+                    requestedPlan: String(data.get("requestedPlan") ?? "").trim(),
+                    requestedAccess: String(data.get("requestedAccess") ?? "").trim(),
+                    accountEmail: String(data.get("accountEmail") ?? "").trim(),
+                    accountPassword: String(data.get("accountPassword") ?? ""),
                   });
                 setOpen(false);
                 toast.success("تم إرسال الطلب بنجاح وأصبح قيد المراجعة");
-              } catch {
-                toast.error("تعذر إرسال الطلب. تحقق من الاتصال والصلاحيات.");
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "تعذر إرسال الطلب. تحقق من الاتصال والصلاحيات.");
+              } finally {
+                setLoading(false);
               }
             }}
           >
             <ServicePicker name="service" label="اسم الخدمة المطلوبة" required />
+            <div className="form-grid two-columns">
+              <label>نوع الاشتراك أو الباقة <input name="requestedPlan" placeholder="مثال: Team أو Pro" /></label>
+              <label>الصلاحية المطلوبة <input name="requestedAccess" placeholder="مثال: Editor أو Full access" /></label>
+              <label>اسم المهندس المستفيد <b>*</b><input name="beneficiaryName" required placeholder="اسم الموظف التابع لفريقك" /></label>
+              <label>البريد الإلكتروني المقترح <input name="accountEmail" type="email" dir="ltr" placeholder="name@company.com" /></label>
+            </div>
+            <label>
+              كلمة المرور المقترحة <span>اختياري</span>
+              <input name="accountPassword" type="password" autoComplete="new-password" dir="ltr" placeholder="تحفظ مشفرة ولا تظهر في السجل أو التقارير" />
+            </label>
             <label>
               الغاية والفائدة المتوقعة
               <textarea
@@ -1884,8 +2012,8 @@ function RequestDialog() {
               <textarea name="notes" rows={2} placeholder="أي تفاصيل أخرى" />
             </label>
             <div className="dialog-actions">
-              <button className="btn primary" type="submit">
-                إرسال الطلب
+              <button className="btn primary" type="submit" disabled={loading}>
+                {loading ? "جارٍ إرسال الطلب..." : "إرسال الطلب"}
               </button>
               <Dialog.Close className="btn secondary" type="button">
                 إلغاء
@@ -1904,9 +2032,15 @@ function RequestDialog() {
 function RenewalDialog() {
   const target = useAppStore((s) => s.renewalTarget),
     setTarget = useAppStore((s) => s.setRenewalTarget);
-  const [id, name = "الاشتراك"] = target?.split("|") ?? [];
+  const [id, name = "الاشتراك", previousEnd] = target?.split("|") ?? [];
   const fallback = subscriptions.find((x) => String(x.id) === id);
   const serviceName = name || fallback?.name || "الاشتراك";
+  const suggestedPeriod = useMemo(() => {
+    const end = previousEnd ? new Date(`${previousEnd}T00:00:00`) : new Date();
+    const start = new Date(end); start.setDate(start.getDate() + 1);
+    const nextEnd = new Date(start); nextEnd.setMonth(nextEnd.getMonth() + 1); nextEnd.setDate(nextEnd.getDate() - 1);
+    return { start: start.toISOString().slice(0, 10), end: nextEnd.toISOString().slice(0, 10) };
+  }, [previousEnd]);
   return (
     <Dialog.Root
       open={Boolean(target)}
@@ -1931,7 +2065,9 @@ function RenewalDialog() {
                   await createRenewalRequest(
                     id,
                     serviceName,
-                    String(data.get("notes") ?? ""),
+                   String(data.get("notes") ?? ""),
+                    suggestedPeriod.start,
+                    suggestedPeriod.end,
                   );
                 setTarget(null);
                 toast.success("تم إرسال طلب التجديد وأصبح قيد المراجعة");
@@ -1943,6 +2079,7 @@ function RenewalDialog() {
             <div className="renewal-confirm">
               <Check /> أؤكد رغبتي في تجديد هذا الاشتراك
             </div>
+            <div className="renewal-period">الفترة المقترحة: <strong dir="ltr">{suggestedPeriod.start.replaceAll("-", "/")} — {suggestedPeriod.end.replaceAll("-", "/")}</strong></div>
             <label>
               ملاحظة إضافية <span>اختياري</span>
               <textarea
@@ -1986,6 +2123,28 @@ function Header({
     enabled: firebaseReady,
   });
   const unread = items.filter((x) => !x.read).length;
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("aait-notification-sound") !== "off");
+  const previousUnread = useRef(unread);
+  useEffect(() => {
+    if (soundEnabled && unread > previousUnread.current) {
+      try {
+        const audio = new AudioContext();
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.frequency.value = 780;
+        gain.gain.setValueAtTime(0.035, audio.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.18);
+        oscillator.connect(gain).connect(audio.destination);
+        oscillator.start(); oscillator.stop(audio.currentTime + 0.18);
+      } catch { /* الصوت اختياري وقد تمنعه المتصفحات قبل تفاعل المستخدم */ }
+    }
+    previousUnread.current = unread;
+  }, [unread, soundEnabled]);
+  const toggleSound = () => setSoundEnabled((enabled) => {
+    const next = !enabled;
+    localStorage.setItem("aait-notification-sound", next ? "on" : "off");
+    return next;
+  });
   return (
     <header>
       <button className="mobile-menu" onClick={onMenu}>
@@ -2004,7 +2163,7 @@ function Header({
         >
           {theme === "dark" ? <Sun /> : <Moon />}
         </button>
-        <DropdownMenu.Root dir="rtl">
+          <DropdownMenu.Root dir="rtl">
           <DropdownMenu.Trigger asChild>
             <button className="icon-btn bell">
               <Bell />
@@ -2013,11 +2172,12 @@ function Header({
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content className="notifications" align="end">
-              <h3>الإشعارات</h3>
+              <div className="notifications-head"><h3>الإشعارات {unread ? <small>{unread} جديدة</small> : null}</h3><div><button type="button" className="icon-btn compact-icon" onClick={toggleSound} title={soundEnabled ? "كتم صوت التنبيهات" : "تفعيل صوت التنبيهات"}>{soundEnabled ? <Volume2 /> : <VolumeX />}</button>{unread > 0 && <button type="button" className="icon-btn compact-icon" onClick={async () => { await markAllNotificationsRead(); queryClient.invalidateQueries({ queryKey: ["notifications"] }); }} title="تعليم الكل كمقروء"><CheckCheck /></button>}</div></div>
               {items.length ? (
-                items.map((item) => (
+                [...items].sort((a, b) => Number(b.created_at?.toDate() ?? 0) - Number(a.created_at?.toDate() ?? 0)).slice(0, 8).map((item) => (
                   <DropdownMenu.Item
                     key={item.id}
+                    className={cn(!item.read && "unread", item.priority === "high" && "important")}
                     onSelect={async () => {
                       if (!item.read) {
                         await markNotificationRead(item.id);
@@ -2025,6 +2185,8 @@ function Header({
                           queryKey: ["notifications"],
                         });
                       }
+                      if (item.request_id) useAppStore.getState().setView("requests");
+                      else if (item.subscription_id) useAppStore.getState().setView("subscriptions");
                     }}
                   >
                     <span>

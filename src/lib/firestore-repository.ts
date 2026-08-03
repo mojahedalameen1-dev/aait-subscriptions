@@ -3,11 +3,11 @@ import { auth, db } from './firebase'
 
 export const ALL_PERMISSIONS = ['view_subscriptions','manage_subscriptions','delete_subscriptions','review_requests','reject_requests','view_financial_reports','manage_users_roles','store_credentials','reveal_credentials','view_audit_log'] as const
 export type UserProfile = { uid: string; name: string; email: string; photo_url: string; roles: string[]; permissions: string[]; is_owner: boolean }
-export type SubscriptionRecord = { id: string; name: string; category?: string; price: number; currency: 'SAR'; billing_cycle: string; renewal_date?: { toDate(): Date }; assigned_to: string[]; status: 'نشط'|'قارب على الانتهاء'|'منتهٍ'|'ملغى'; account_email?: string; access_url?: string; has_stored_credentials?: boolean }
-export type RequestRecord = { id: string; type: 'new'|'renewal'; service_name: string; purpose: string; notes?: string; requested_by: string; requester_name?: string; status: 'قيد المراجعة'|'مكتمل'|'مرفوض'; rejection_reason?: string; created_at?: { toDate(): Date } }
+export type SubscriptionRecord = { id: string; name: string; category?: string; price: number; currency: 'SAR'; billing_cycle: string; renewal_date?: { toDate(): Date }; assigned_to: string[]; status: 'نشط'|'قارب على الانتهاء'|'منتهٍ'|'ملغى'; account_email?: string; access_url?: string; has_stored_credentials?: boolean; team_lead_uid?: string; team_lead_name?: string; beneficiary_name?: string; requested_plan?: string; renewal_of?: string; renewal_count?: number }
+export type RequestRecord = { id: string; type: 'new'|'renewal'; service_name: string; purpose: string; notes?: string; requested_by: string; requester_name?: string; beneficiary_name?: string; requested_plan?: string; requested_access?: string; proposed_account_email?: string; proposed_password?: string; related_subscription_id?: string; suggested_start_date?: string; suggested_renewal_date?: string; status: 'قيد المراجعة'|'مكتمل'|'مرفوض'; rejection_reason?: string; created_at?: { toDate(): Date } }
 export type RoleRecord = { id: string; name: string; permissions: string[]; protected?: boolean }
 export type AuditRecord = { id: string; action: string; entity_id: string; entity_type?: string; entity_name?: string; actor_name?: string; details?: string; summary?: string; created_at?: { toDate(): Date } }
-export type NotificationRecord = { id: string; title: string; body: string; read: boolean; created_at?: { toDate(): Date } }
+export type NotificationRecord = { id: string; title: string; body: string; read: boolean; priority?: 'high'|'normal'; request_id?: string; subscription_id?: string; created_at?: { toDate(): Date } }
 
 function requireContext() { if (!db || !auth?.currentUser) throw new Error('Firebase غير متصل'); return { db, user: auth.currentUser } }
 
@@ -30,12 +30,12 @@ export async function ensureUserProfile(): Promise<UserProfile> {
   })
 }
 
-export async function createSubscriptionRequest(input: { service_name: string; purpose: string; notes?: string }) {
-  return secureAction('create_request',{type:'new',serviceName:input.service_name,purpose:input.purpose,notes:input.notes??''})
+export async function createSubscriptionRequest(input: { service_name: string; purpose: string; notes?: string; beneficiaryName: string; requestedPlan?: string; requestedAccess?: string; accountEmail?: string; accountPassword?: string }) {
+  return secureAction('create_request',{type:'new',serviceName:input.service_name,purpose:input.purpose,notes:input.notes??'',beneficiaryName: input.beneficiaryName, requestedPlan: input.requestedPlan ?? '', requestedAccess: input.requestedAccess ?? '', accountEmail: input.accountEmail ?? '', accountPassword: input.accountPassword ?? ''})
 }
 
-export async function createRenewalRequest(subscriptionId: string, serviceName: string, notes?: string) {
-  return secureAction('create_request',{type:'renewal',serviceName,purpose:'تجديد الاشتراك الحالي',notes:notes??'',subscriptionId})
+export async function createRenewalRequest(subscriptionId: string, serviceName: string, notes?: string, suggestedStartDate?: string, suggestedRenewalDate?: string) {
+  return secureAction('create_request',{type:'renewal',serviceName,purpose:'تجديد الاشتراك الحالي',notes:notes??'',subscriptionId,suggestedStartDate, suggestedRenewalDate})
 }
 
 const rows = <T,>(snapshot: Awaited<ReturnType<typeof getDocs>>) => snapshot.docs.map(item => ({ id: item.id, ...(item.data() as Record<string, unknown>) } as T))
@@ -54,6 +54,7 @@ export async function updateSubscription(subscriptionId:string,changes:Record<st
 export async function deleteSubscription(subscriptionId:string) { return secureAction('delete_subscription',{subscriptionId}) }
 
 export async function markNotificationRead(id:string) { const { db } = requireContext(); return updateDoc(doc(db,'notifications',id),{read:true}) }
+export async function markAllNotificationsRead() { const { db, user } = requireContext(); const snapshot = await getDocs(query(collection(db,'notifications'),where('user_id','==',user.uid),where('read','==',false))); await Promise.all(snapshot.docs.map((item) => updateDoc(item.ref,{read:true}))) }
 
 export async function secureAction<T = { ok: true }>(action:string,payload:Record<string,unknown>):Promise<T> {
   const user = auth?.currentUser
@@ -66,7 +67,7 @@ export async function secureAction<T = { ok: true }>(action:string,payload:Recor
 }
 
 export async function rejectRequest(requestId: string, reason: string) { return secureAction('reject_request',{requestId,reason}) }
-export async function approveRequest(requestId:string,input:{cost:number;billingCycle:string;renewalDate:string;category:string;accountEmail:string;accessUrl?:string;assignedTo?:string[]}) { return secureAction('approve_request',{requestId,...input}) }
+export async function approveRequest(requestId:string,input:{cost:number;billingCycle:string;renewalDate:string;renewalStartDate?:string;category:string;accountEmail:string;accessUrl?:string;assignedTo?:string[]}) { return secureAction('approve_request',{requestId,...input}) }
 export async function revealCredential(subscriptionId:string) { return secureAction<{ok:true;secret:{username?:string;password?:string;url?:string}}>('reveal_credential',{subscriptionId,confirmed:true}) }
 export async function storeCredential(subscriptionId:string,secret:{username?:string;password?:string;url?:string}) { return secureAction('store_credential',{subscriptionId,secret}) }
 
