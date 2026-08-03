@@ -1453,6 +1453,24 @@ function ReportsView() {
           </BarChart>
         </ResponsiveContainer>
       </section>
+      <section className="panel report-details">
+        <div className="panel-head">
+          <div>
+            <h2>تفاصيل الاشتراكات</h2>
+            <p>البيانات المطابقة للخدمات والفترة المحددة، جاهزة للمراجعة والتصدير.</p>
+          </div>
+          <span className="result-count">{filteredItems.length} اشتراك</span>
+        </div>
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>تاريخ التجديد</th><th>الحالة</th><th>قائد الفريق</th><th>المستفيد</th></tr></thead>
+            <tbody>
+              {filteredItems.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{formatSAR(item.price)}</td><td>{item.cycle}</td><td dir="ltr">{item.renewal}</td><td><span className="table-status">{item.status}</span></td><td>{item.teamLeadName ?? "—"}</td><td>{item.beneficiaryName ?? "—"}</td></tr>)}
+              {!filteredItems.length && <tr><td colSpan={7} className="table-empty">لا توجد اشتراكات مطابقة للفلاتر الحالية.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   );
 }
@@ -1522,6 +1540,7 @@ function UserRoleEditor({
 
 function RolesView({ canGrantOwner, canDeleteUsers }: { canGrantOwner: boolean; canDeleteUsers: boolean }) {
   const queryClient = useQueryClient();
+  const [activeSection, setActiveSection] = useState<"roles" | "members">("roles");
   const [selected, setSelected] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -1576,7 +1595,14 @@ function RolesView({ canGrantOwner, canDeleteUsers }: { canGrantOwner: boolean; 
       <PageTitle
         title="الأدوار والصلاحيات"
         subtitle="كل مستخدم جديد موظف تلقائيًا، ولا يحصل على الإدارة إلا بدور تمنحه أنت"
+        action={
+          <div className="section-switcher" role="tablist" aria-label="أقسام الصلاحيات">
+            <button type="button" role="tab" aria-selected={activeSection === "roles"} className={activeSection === "roles" ? "active" : ""} onClick={() => setActiveSection("roles")}><ShieldCheck /> الأدوار</button>
+            <button type="button" role="tab" aria-selected={activeSection === "members"} className={activeSection === "members" ? "active" : ""} onClick={() => setActiveSection("members")}><Users /> الأعضاء</button>
+          </div>
+        }
       />
+      {activeSection === "roles" ? <>
       <div className="roles-grid">
         {roleData.map((role, i) => (
           <article className="role-card" key={role.id}>
@@ -1652,6 +1678,7 @@ function RolesView({ canGrantOwner, canDeleteUsers }: { canGrantOwner: boolean; 
           </button>
         </form>
       </section>
+      </> :
       <section className="panel permission-panel">
         <div className="panel-head">
           <div>
@@ -1675,6 +1702,7 @@ function RolesView({ canGrantOwner, canDeleteUsers }: { canGrantOwner: boolean; 
         </div>)}
         {!visibleUsers.length && <div className="inline-empty">لا يوجد موظف مطابق لبحثك.</div>}
       </section>
+      }
       <ConfirmDialog
         open={Boolean(userDeleteTarget)}
         title="حذف حساب المستخدم؟"
@@ -2498,7 +2526,7 @@ export default function App() {
           theme={theme}
           onToggleTheme={toggleTheme}
         />
-        <main>{content}</main>
+        <main><div className="view-frame" key={`${activeWorkspace}:${safeView}`}>{content}</div></main>
         <footer>
           {activeWorkspace === "employee"
             ? "بوابة موظفي AAIT"

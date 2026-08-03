@@ -35,15 +35,14 @@ select {
 button {
   cursor: pointer;
 }
-@keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes fade-overlay { from { opacity: 0; } to { opacity: 1; } }
-@keyframes soft-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 0%, transparent); } }
-.main-column > * { animation: rise-in 220ms cubic-bezier(.23,1,.32,1) both; }
-.main-column > *:nth-child(2) { animation-delay: 35ms; }.main-column > *:nth-child(3) { animation-delay: 70ms; }
+@keyframes view-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes overlay-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dialog-enter { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(.985); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 .btn, .icon-btn, nav button { transition: transform 150ms ease, box-shadow 150ms ease, background-color 150ms ease, color 150ms ease; }
 .btn:active, .icon-btn:active, nav button:active { transform: scale(.97); }
-.dialog-overlay { animation: fade-overlay 200ms cubic-bezier(.23,1,.32,1); }
-.dialog-content { animation: rise-in 220ms cubic-bezier(.23,1,.32,1); will-change: transform; }
+.view-frame { animation: view-enter 220ms cubic-bezier(.23,1,.32,1) both; }
+.dialog-overlay { animation: overlay-enter 200ms cubic-bezier(.23,1,.32,1); }
+.dialog-content { animation: dialog-enter 200ms cubic-bezier(.23,1,.32,1); will-change: transform; }
 .subscription-card, .metric-card, .panel { transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background-color .25s ease, color .25s ease; }
 .user-role-actions { display: flex; align-items: center; gap: 10px; }
 @media (hover: hover) and (pointer: fine) { .subscription-card:hover, .metric-card:hover { transform: translateY(-3px); box-shadow: 0 16px 34px var(--shadow); } .btn.primary:hover { box-shadow: 0 9px 20px #20b7df40; } }
@@ -1268,6 +1267,98 @@ footer {
   .dialog-content {
     padding: 21px;
   }
+}
+
+/* Final UX pass: hierarchy, density, touch targets and purposeful motion. */
+.view-frame { min-width: 0; }
+.page-title h1 { letter-spacing: -.02em; }
+.page-title p,
+.panel-head p,
+.metric-card p,
+.metric-card small,
+.subscription-card small,
+.request-details,
+.activity-meta,
+.role-card p { font-size: 12px; line-height: 1.75; }
+.metric-card h3,
+.subscription-card h3,
+.request-main h3,
+.role-card h3 { font-size: 15px; line-height: 1.55; }
+.btn { min-height: 42px; padding-inline: 16px; }
+.icon-btn,
+.mobile-menu { min-width: 42px; min-height: 42px; }
+.panel { border-radius: 18px; }
+.subscriptions-grid.full {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 460px));
+  justify-content: start;
+  align-items: stretch;
+}
+.subscription-card { min-height: 230px; }
+.request-row { padding: 18px; border-radius: 14px; }
+.request-main { min-width: 0; }
+.activity-entry { padding-block: 17px; }
+.activity-entry h3 { font-size: 13px; }
+.section-switcher {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.section-switcher button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+.section-switcher button svg { width: 17px; }
+.section-switcher button.active { background: var(--primary); color: #fff; box-shadow: 0 7px 18px #20b7df35; }
+.permission-panel { animation: view-enter 180ms cubic-bezier(.23,1,.32,1) both; }
+.report-details { margin-top: 18px; }
+.result-count {
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.data-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 13px; }
+.data-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: 12px; }
+.data-table th { padding: 13px 14px; background: color-mix(in srgb, var(--navy) 5%, var(--surface)); color: var(--muted); text-align: right; font-weight: 600; }
+.data-table td { padding: 14px; border-top: 1px solid var(--border); color: var(--muted); }
+.data-table td strong { color: inherit; font-size: 13px; }
+.data-table tbody tr { transition: background-color 150ms ease; }
+.table-status { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: color-mix(in srgb, var(--success) 11%, var(--surface)); color: var(--success); font-weight: 600; }
+.table-empty { padding: 30px !important; text-align: center; }
+
+@media (hover: hover) and (pointer: fine) {
+  .data-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 4%, var(--surface)); }
+  .section-switcher button:not(.active):hover { background: color-mix(in srgb, var(--primary) 6%, var(--surface)); color: var(--primary); }
+}
+
+@media (max-width: 760px) {
+  .btn, .icon-btn, .mobile-menu, .section-switcher button { min-height: 44px; }
+  .page-title { gap: 14px; }
+  .page-title > div, .page-title > .section-switcher { width: 100%; }
+  .section-switcher button { flex: 1; justify-content: center; }
+  .subscriptions-grid.full { grid-template-columns: 1fr; }
+  .subscription-card { min-height: auto; }
+  .request-row { padding: 15px; }
+  .activity-entry { grid-template-columns: 38px minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-frame, .dialog-overlay, .dialog-content, .permission-panel { animation: none; }
+  .subscription-card, .metric-card, .panel, .data-table tbody tr { transition: none; }
 }
 
 /* Complete dark theme */
