@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function profileExists() { return signedIn() && exists(userPath()); }
+    function hasPermission(permission) { return profileExists() && permission in get(userPath()).data.permissions; }
+    match /system/config {
+      allow read: if signedIn();
+      allow create: if signedIn() && !exists(/databases/$(database)/documents/system/config)
+        && request.resource.data.owner_uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || hasPermission('manage_users_roles'));
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.uid == request.auth.uid
+        && (request.resource.data.is_owner == false
+          || getAfter(/databases/$(database)/documents/system/config).data.owner_uid == request.auth.uid);
+      allow update: if signedIn() && (
+        (request.auth.uid == uid && request.resource.data.roles == resource.data.roles
+          && request.resource.data.permissions == resource.data.permissions
+          && request.resource.data.is_owner == resource.data.is_owner)
+        );
+      allow delete: if false;
+    }
+
+    match /roles/{roleId} {
+      allow read: if signedIn();
+      allow create: if roleId == 'system-owner' && !exists(/databases/$(database)/documents/system/config)
+          && request.resource.data.created_by == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /subscriptions/{id} {
+      allow read: if hasPermission('view_subscriptions') || hasPermission('view_financial_reports')
+        || (signedIn() && request.auth.uid in resource.data.assigned_to);
+      allow create, update, delete: if false;
+    }
+
+    match /subscription_requests/{id} {
+      allow create: if false;
+      allow read: if signedIn() && (resource.data.requested_by == request.auth.uid
+        || hasPermission('review_requests') || hasPermission('reject_requests'));
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /audit_logs/{id} {
+      allow read: if hasPermission('view_audit_log');
+      allow write: if false;
+    }
+
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.user_id == request.auth.uid;
+      allow update: if signedIn() && resource.data.user_id == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;
+    }
+  }
+}
