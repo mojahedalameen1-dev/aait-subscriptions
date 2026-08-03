@@ -13,6 +13,7 @@ type Permission =
   | "delete_subscriptions";
 
 type Profile = { permissions?: Permission[]; name?: string };
+const SUPER_ADMIN_EMAIL = "asimesmat1@gmail.com";
 const ALL_SYSTEM_PERMISSIONS = [
   "view_subscriptions",
   "manage_subscriptions",
@@ -109,6 +110,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const profile = (profileDoc.data() ?? {}) as Profile;
     const action = String(req.body?.action ?? "");
     const payload = req.body?.payload ?? {};
+
+    if (action === "delete_user") {
+      if (authUser.email?.toLowerCase() !== SUPER_ADMIN_EMAIL)
+        throw new Error("هذه العملية متاحة للسوبر أدمن فقط");
+      const uid = String(payload.uid ?? "");
+      if (!uid || uid === authUser.uid) throw new Error("لا يمكن حذف حساب السوبر أدمن الحالي");
+      const targetRef = db.doc(`users/${uid}`);
+      const target = await targetRef.get();
+      if (!target.exists) throw new Error("المستخدم غير موجود");
+      const configRef = db.doc("system/config");
+      const config = await configRef.get();
+      const assigned = await db.collection("subscriptions").where("assigned_to", "array-contains", uid).get();
+      const batch = db.batch();
+      assigned.docs.forEach((subscription) => batch.update(subscription.ref, { assigned_to: (subscription.data().assigned_to ?? []).filter((id: string) => id !== uid), updated_at: FieldValue.serverTimestamp() }));
+      if (config.data()?.owner_uid === uid) {
+        batch.set(configRef, { owner_uid: authUser.uid, transferred_at: FieldValue.serverTimestamp() }, { merge: true });
+        batch.set(db.doc(`users/${authUser.uid}`), { is_owner: true, roles: ["system-owner"], permissions: ALL_SYSTEM_PERMISSIONS, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
+      batch.delete(targetRef);
+      batch.create(db.collection("audit_logs").doc(), { action: "حذف مستخدم", entity_id: uid, entity_type: target.data()?.is_owner ? "مالك نظام" : "عضو", entity_name: target.data()?.name ?? target.data()?.email ?? "مستخدم", actor_uid: authUser.uid, actor_name: profile.name ?? authUser.email, summary: `تم حذف حساب ${String(target.data()?.name ?? target.data()?.email ?? "مستخدم")} بواسطة السوبر أدمن.`, created_at: FieldValue.serverTimestamp() });
+      await batch.commit();
+      await getAuth(app).deleteUser(uid).catch(() => undefined);
+      return res.status(200).json({ ok: true });
+    }
 
     if (action === "create_request") {
       const type = payload.type === "renewal" ? "renewal" : "new";

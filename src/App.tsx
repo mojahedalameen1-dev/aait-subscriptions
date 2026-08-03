@@ -75,6 +75,7 @@ import {
   createSubscriptionRequest,
   deleteSubscription,
   deleteRole,
+  deleteUser,
   ensureUserProfile,
   listAllRequests,
   listAllSubscriptions,
@@ -1519,13 +1520,14 @@ function UserRoleEditor({
   );
 }
 
-function RolesView({ canGrantOwner }: { canGrantOwner: boolean }) {
+function RolesView({ canGrantOwner, canDeleteUsers }: { canGrantOwner: boolean; canDeleteUsers: boolean }) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [ownerTarget, setOwnerTarget] = useState<UserProfile | null>(null);
+  const [userDeleteTarget, setUserDeleteTarget] = useState<UserProfile | null>(null);
   const { data: roleData = [] } = useQuery({
     queryKey: ["roles"],
     queryFn: listRoles,
@@ -1667,18 +1669,21 @@ function RolesView({ canGrantOwner }: { canGrantOwner: boolean }) {
           />
           {employeeSearch && <button type="button" onClick={() => setEmployeeSearch("")} aria-label="مسح البحث"><X /></button>}
         </label>
-        {visibleUsers.map((user) => (
-          <UserRoleEditor
-            key={`${user.uid}:${(user.roles ?? []).join(",")}`}
-            user={user}
-            roles={roleData.filter((role) => !role.protected)}
-            onSave={assign}
-            onGrantOwner={setOwnerTarget}
-            canGrantOwner={canGrantOwner}
-          />
-        ))}
+        {visibleUsers.map((user) => <div className="user-role-actions" key={`${user.uid}:${(user.roles ?? []).join(",")}`}>
+          <UserRoleEditor user={user} roles={roleData.filter((role) => !role.protected)} onSave={assign} onGrantOwner={setOwnerTarget} canGrantOwner={canGrantOwner} />
+          {canDeleteUsers && <button className="btn danger compact" type="button" onClick={() => setUserDeleteTarget(user)}><Trash2 /> حذف الحساب</button>}
+        </div>)}
         {!visibleUsers.length && <div className="inline-empty">لا يوجد موظف مطابق لبحثك.</div>}
       </section>
+      <ConfirmDialog
+        open={Boolean(userDeleteTarget)}
+        title="حذف حساب المستخدم؟"
+        description={`سيُحذف حساب «${userDeleteTarget?.name ?? ""}» نهائيًا، بما في ذلك إمكانية تسجيل الدخول. هذا الإجراء مخصص للسوبر أدمن فقط.`}
+        confirmLabel="حذف الحساب نهائيًا"
+        danger
+        onOpenChange={(open) => !open && setUserDeleteTarget(null)}
+        onConfirm={async () => { if (!userDeleteTarget) return; await deleteUser(userDeleteTarget.uid); await queryClient.invalidateQueries({ queryKey: ["users"] }); toast.success("تم حذف الحساب"); }}
+      />
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="حذف الدور المخصص؟"
@@ -2465,10 +2470,10 @@ export default function App() {
         subscriptions: <SubscriptionsView permissions={permissions} />,
         requests: <RequestsView permissions={permissions} />,
         reports: <ReportsView />,
-        roles: <RolesView canGrantOwner={Boolean(profile?.is_owner)} />,
+        roles: <RolesView canGrantOwner={Boolean(profile?.is_owner)} canDeleteUsers={profile?.email?.toLowerCase() === "asimesmat1@gmail.com"} />,
         audit: <AuditView />,
       })[safeView],
-    [safeView, permissions, profile?.is_owner],
+    [safeView, permissions, profile?.is_owner, profile?.email],
   );
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
   if (!authenticated) return <LoginScreen theme={theme} onToggleTheme={toggleTheme} />;

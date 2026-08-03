@@ -75,3 +75,4 @@ export async function saveRole(name: string, permissions: string[]) { return sec
 export async function assignRoles(uid: string, roleIds: string[]) { return secureAction('assign_roles',{uid,roleIds}) }
 export async function deleteRole(roleId: string) { return secureAction('delete_role',{roleId}) }
 export async function grantSystemOwner(uid: string) { return secureAction('grant_system_owner',{uid}) }
+export async function deleteUser(uid: string) { return secureAction('delete_user',{uid}) }
