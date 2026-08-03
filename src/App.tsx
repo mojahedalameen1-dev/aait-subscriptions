@@ -37,7 +37,9 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   Area,
   AreaChart,
@@ -1347,6 +1349,7 @@ function ReportsView() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
   const { data: items = subscriptions } = useQuery({
     queryKey: ["all-subscriptions"],
     queryFn: async () =>
@@ -1377,37 +1380,110 @@ function ReportsView() {
   const expiredCount = filteredItems.filter((x) => x.status === "منتهٍ").length;
   const canceledCount = filteredItems.filter((x) => x.status === "ملغى").length;
   const reportData = monthlySeries(monthly);
+  const reportPeriod = `${from || "بداية السجل"} - ${to || "اليوم"}`;
   const exportExcel = () => {
-    const summary = [["تقرير اشتراكات AAIT"], ["الفترة", `${from || "البداية"} — ${to || "اليوم"}`], ["إجمالي المصروفات الشهرية", monthly], ["الإجمالي السنوي المتوقع", annual], [], ["الخدمة", "التكلفة", "الدورة", "تاريخ التجديد", "الحالة", "قائد الفريق", "المهندس المستفيد"]];
-    filteredItems.forEach((item) => summary.push([item.name, item.price, item.cycle, item.renewal, item.status, item.teamLeadName ?? "—", item.beneficiaryName ?? "—"]));
-    const ws = XLSX.utils.aoa_to_sheet(summary);
-    ws["!views"] = [{ rightToLeft: true }];
-    ws["!cols"] = [20, 14, 16, 16, 16, 22, 22].map((wch) => ({ wch }));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, ws, "التقرير");
-    XLSX.writeFile(workbook, `تقرير-الاشتراكات-${from || "كامل"}-${to || "الحالي"}.xlsx`);
+    if (!filteredItems.length) return toast.error("لا توجد بيانات مطابقة لتصديرها");
+    setExporting("excel");
+    try {
+      const workbook = XLSX.utils.book_new();
+      const summary = XLSX.utils.aoa_to_sheet([
+        ["تقرير الاشتراكات والخدمات - AAIT", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", ""],
+        [`الفترة: ${reportPeriod}`, "", "", "", "", "", `تاريخ الإصدار: ${new Date().toLocaleDateString("en-CA").replaceAll("-", "/")}`],
+        [],
+        ["الإنفاق الشهري", "", "الإجمالي السنوي المتوقع", "", "عدد الاشتراكات", "", "متوسط الاشتراك"],
+        [monthly, "", annual, "", filteredItems.length, "", average],
+        [],
+        ["ملخص الخدمات", "", "", "", "", "", ""],
+        ["الخدمة", "عدد الاشتراكات", "الإنفاق الشهري", "الحصة من الإنفاق", "", "", ""],
+        ...availableServices.filter((service) => !selectedServices.length || selectedServices.includes(service)).map((service) => {
+          const serviceItems = filteredItems.filter((item) => item.name === service);
+          const serviceMonthly = Math.round(serviceItems.reduce((sum, item) => sum + item.price / (item.cycle === "سنوي" ? 12 : item.cycle === "ربع سنوي" ? 3 : 1), 0));
+          return [service, serviceItems.length, serviceMonthly, monthly ? serviceMonthly / monthly : 0, "", "", ""];
+        }),
+      ]);
+      summary["!merges"] = [XLSX.utils.decode_range("A1:G2"), XLSX.utils.decode_range("A8:G8"), XLSX.utils.decode_range("A5:B5"), XLSX.utils.decode_range("A6:B6"), XLSX.utils.decode_range("C5:D5"), XLSX.utils.decode_range("C6:D6"), XLSX.utils.decode_range("E5:F5"), XLSX.utils.decode_range("E6:F6")];
+      summary["!views"] = [{ rightToLeft: true, showGridLines: false }];
+      summary["!cols"] = [{ wch: 27 }, { wch: 17 }, { wch: 24 }, { wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 21 }];
+      summary["!rows"] = [{ hpt: 28 }, { hpt: 28 }, { hpt: 24 }, { hpt: 10 }, { hpt: 24 }, { hpt: 34 }, { hpt: 10 }, { hpt: 26 }, { hpt: 24 }];
+      const navy = "102D3E", cyan = "20B7DF", pale = "EAF8FC", border = "DCE8ED", white = "FFFFFF", muted = "607783";
+      for (const cell of ["A1"]) summary[cell].s = { font: { name: "IBM Plex Sans Arabic", bold: true, sz: 20, color: { rgb: white } }, fill: { fgColor: { rgb: navy } }, alignment: { horizontal: "right", vertical: "center", readingOrder: 2 } };
+      for (const cell of ["A3", "G3"]) summary[cell].s = { font: { name: "IBM Plex Sans Arabic", sz: 10, color: { rgb: muted } }, alignment: { horizontal: cell === "A3" ? "right" : "left", readingOrder: 2 } };
+      ["A5", "C5", "E5", "G5"].forEach((cell) => summary[cell].s = { font: { name: "IBM Plex Sans Arabic", bold: true, sz: 10, color: { rgb: muted } }, fill: { fgColor: { rgb: pale } }, alignment: { horizontal: "center", vertical: "center", readingOrder: 2 }, border: { bottom: { style: "thin", color: { rgb: border } } } });
+      ["A6", "C6", "E6", "G6"].forEach((cell) => summary[cell].s = { font: { name: "IBM Plex Sans Arabic", bold: true, sz: 18, color: { rgb: navy } }, fill: { fgColor: { rgb: pale } }, alignment: { horizontal: "center", vertical: "center" }, numFmt: cell === "E6" ? "#,##0" : '#,##0 "ر.س"' });
+      summary["A8"].s = { font: { name: "IBM Plex Sans Arabic", bold: true, sz: 13, color: { rgb: white } }, fill: { fgColor: { rgb: cyan } }, alignment: { horizontal: "right", vertical: "center", readingOrder: 2 } };
+      ["A9", "B9", "C9", "D9"].forEach((cell) => summary[cell].s = { font: { name: "IBM Plex Sans Arabic", bold: true, color: { rgb: white } }, fill: { fgColor: { rgb: navy } }, alignment: { horizontal: "center", readingOrder: 2 } });
+      const summaryEnd = 9 + filteredItems.length;
+      for (let row = 10; row <= summaryEnd; row += 1) {
+        for (const col of ["A", "B", "C", "D"]) if (summary[`${col}${row}`]) summary[`${col}${row}`].s = { font: { name: "IBM Plex Sans Arabic", sz: 10, color: { rgb: navy } }, fill: { fgColor: { rgb: row % 2 ? "F6FAFC" : white } }, alignment: { horizontal: col === "A" ? "right" : "center", readingOrder: 2 }, border: { bottom: { style: "thin", color: { rgb: border } } }, numFmt: col === "C" ? '#,##0 "ر.س"' : col === "D" ? "0%" : undefined };
+      }
+      const detailsRows = filteredItems.map((item) => [item.name, item.price, item.cycle, new Date(`${item.renewalDate}T00:00:00`), item.status, item.teamLeadName ?? "-", item.beneficiaryName ?? "-"]);
+      const details = XLSX.utils.aoa_to_sheet([["تفاصيل الاشتراكات", "", "", "", "", "", ""], ["الخدمة", "التكلفة", "الدورة", "تاريخ التجديد", "الحالة", "قائد الفريق", "المستفيد"], ...detailsRows]);
+      details["!merges"] = [XLSX.utils.decode_range("A1:G1")];
+      details["!views"] = [{ rightToLeft: true, showGridLines: false }];
+      details["!cols"] = [{ wch: 25 }, { wch: 16 }, { wch: 17 }, { wch: 18 }, { wch: 18 }, { wch: 23 }, { wch: 23 }];
+      details["!rows"] = [{ hpt: 32 }, { hpt: 27 }];
+      details["!autofilter"] = { ref: `A2:G${detailsRows.length + 2}` };
+      details["!freeze"] = { xSplit: 0, ySplit: 2, topLeftCell: "A3", activePane: "bottomLeft", state: "frozen" };
+      details["A1"].s = { font: { name: "IBM Plex Sans Arabic", bold: true, sz: 17, color: { rgb: white } }, fill: { fgColor: { rgb: navy } }, alignment: { horizontal: "right", vertical: "center", readingOrder: 2 } };
+      for (let col = 0; col < 7; col += 1) details[XLSX.utils.encode_cell({ r: 1, c: col })].s = { font: { name: "IBM Plex Sans Arabic", bold: true, color: { rgb: white } }, fill: { fgColor: { rgb: cyan } }, alignment: { horizontal: "center", vertical: "center", readingOrder: 2 } };
+      for (let row = 2; row < detailsRows.length + 2; row += 1) for (let col = 0; col < 7; col += 1) {
+        const cell = details[XLSX.utils.encode_cell({ r: row, c: col })];
+        if (!cell) continue;
+        cell.s = { font: { name: "IBM Plex Sans Arabic", sz: 10, color: { rgb: navy } }, fill: { fgColor: { rgb: row % 2 ? "F5FAFC" : white } }, alignment: { horizontal: col === 0 || col >= 4 ? "right" : "center", vertical: "center", readingOrder: 2 }, border: { bottom: { style: "thin", color: { rgb: border } } }, numFmt: col === 1 ? '#,##0 "ر.س"' : col === 3 ? "yyyy/mm/dd" : undefined };
+      }
+      XLSX.utils.book_append_sheet(workbook, summary, "الملخص");
+      XLSX.utils.book_append_sheet(workbook, details, "التفاصيل");
+      XLSX.writeFile(workbook, `تقرير-اشتراكات-AAIT-${from || "كامل"}-${to || "الحالي"}.xlsx`, { compression: true });
+      toast.success("تم إنشاء ملف Excel الاحترافي");
+    } catch { toast.error("تعذر إنشاء ملف Excel، حاول مرة أخرى"); }
+    finally { setExporting(null); }
   };
-  const exportPdf = () => {
-    const rows = filteredItems.map((item) => `<tr><td>${item.name}</td><td>${formatSAR(item.price)}</td><td>${item.cycle}</td><td>${item.renewal}</td><td>${item.status}</td><td>${item.teamLeadName ?? "—"}</td><td>${item.beneficiaryName ?? "—"}</td></tr>`).join("");
-    const popup = window.open("", "_blank", "noopener,noreferrer");
-    if (!popup) return toast.error("اسمح للنظام بفتح نافذة الطباعة لتصدير PDF");
-    popup.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير الاشتراكات</title><style>body{font-family:'IBM Plex Sans Arabic',Arial,sans-serif;color:#102d3e;padding:34px}h1{margin:0;color:#0b8db4}p{color:#587080}.cards{display:flex;gap:12px;margin:24px 0}.card{border:1px solid #dbe7ec;border-radius:12px;padding:14px;min-width:160px}.card b{display:block;font-size:20px;margin-top:6px}table{width:100%;border-collapse:collapse;margin-top:22px;font-size:12px}th{background:#0d3142;color:#fff}th,td{padding:10px;border:1px solid #dbe7ec;text-align:right}@media print{body{padding:0}}</style></head><body><h1>تقرير الاشتراكات</h1><p>الفترة: ${from || "بداية السجل"} — ${to || "اليوم"}</p><div class="cards"><div class="card">الإنفاق الشهري<b>${formatSAR(monthly)}</b></div><div class="card">الإجمالي السنوي<b>${formatSAR(annual)}</b></div><div class="card">عدد الاشتراكات<b>${filteredItems.length}</b></div></div><table><thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>التجديد</th><th>الحالة</th><th>قائد الفريق</th><th>المهندس المستفيد</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>لا توجد بيانات ضمن الفلاتر الحالية</td></tr>"}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`);
-    popup.document.close();
+  const exportPdf = async () => {
+    if (!filteredItems.length) return toast.error("لا توجد بيانات مطابقة لتصديرها");
+    setExporting("pdf");
+    try {
+      const fontBuffer = await fetch("/fonts/IBMPlexSansArabic-Regular.ttf").then((response) => { if (!response.ok) throw new Error("font"); return response.arrayBuffer(); });
+      let binary = ""; const bytes = new Uint8Array(fontBuffer); for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+      doc.addFileToVFS("IBMPlexSansArabic-Regular.ttf", btoa(binary));
+      doc.addFont("IBMPlexSansArabic-Regular.ttf", "IBMPlexArabic", "normal");
+      doc.setFont("IBMPlexArabic"); doc.setR2L(true);
+      doc.setFillColor(16, 45, 62); doc.rect(0, 0, 297, 36, "F");
+      doc.setTextColor(255, 255, 255); doc.setFontSize(20); doc.text("تقرير الاشتراكات والخدمات", 282, 15, { align: "right" });
+      doc.setFontSize(9); doc.setTextColor(189, 220, 232); doc.text(`AAIT  |  الفترة: ${reportPeriod}`, 282, 25, { align: "right" });
+      const cards = [{ x: 15, title: "متوسط الاشتراك", value: formatSAR(average) }, { x: 106, title: "عدد الاشتراكات", value: String(filteredItems.length) }, { x: 197, title: "الإنفاق السنوي المتوقع", value: formatSAR(annual) }];
+      cards.forEach((card) => { doc.setFillColor(239, 249, 252); doc.roundedRect(card.x, 43, 85, 24, 3, 3, "F"); doc.setTextColor(91, 116, 129); doc.setFontSize(8); doc.text(card.title, card.x + 78, 51, { align: "right" }); doc.setTextColor(16, 45, 62); doc.setFontSize(14); doc.text(card.value, card.x + 78, 61, { align: "right" }); });
+      autoTable(doc, {
+        startY: 75,
+        head: [["المستفيد", "قائد الفريق", "الحالة", "تاريخ التجديد", "الدورة", "التكلفة", "الخدمة"]],
+        body: filteredItems.map((item) => [item.beneficiaryName ?? "-", item.teamLeadName ?? "-", item.status, item.renewal, item.cycle, formatSAR(item.price), item.name]),
+        styles: { font: "IBMPlexArabic", fontSize: 8.5, halign: "right", valign: "middle", cellPadding: 3.5, textColor: [39, 63, 76], lineColor: [220, 232, 237], lineWidth: { bottom: .15 } },
+        headStyles: { fillColor: [32, 183, 223], textColor: 255, fontStyle: "normal", halign: "right", minCellHeight: 10 },
+        alternateRowStyles: { fillColor: [247, 251, 252] },
+        margin: { left: 15, right: 15, bottom: 16 },
+        didDrawPage: ({ pageNumber }) => { doc.setFont("IBMPlexArabic"); doc.setFontSize(7.5); doc.setTextColor(117, 137, 148); doc.text(`صفحة ${pageNumber}`, 15, 202); doc.text(`صدر في ${new Date().toLocaleDateString("en-CA").replaceAll("-", "/")}`, 282, 202, { align: "right" }); },
+      });
+      doc.save(`تقرير-اشتراكات-AAIT-${from || "كامل"}-${to || "الحالي"}.pdf`);
+      toast.success("تم تنزيل تقرير PDF بنجاح");
+    } catch { toast.error("تعذر إنشاء PDF. تحقق من الاتصال ثم حاول مجددًا"); }
+    finally { setExporting(null); }
   };
   return (
     <>
       <PageTitle
         title="التقارير المالية"
         subtitle="رؤية واضحة لتكاليف الخدمات والاتجاهات"
-        action={<div className="report-export-actions"><button className="btn secondary" onClick={exportExcel}><FileSpreadsheet /> تصدير Excel</button><button className="btn primary" onClick={exportPdf}><FileText /> تصدير PDF</button></div>}
+        action={<div className="report-export-actions"><button className="btn secondary" onClick={exportExcel} disabled={Boolean(exporting)}><FileSpreadsheet /> {exporting === "excel" ? "جارٍ تجهيز Excel..." : "تنزيل Excel"}</button><button className="btn primary" onClick={exportPdf} disabled={Boolean(exporting)}><FileText /> {exporting === "pdf" ? "جارٍ تجهيز PDF..." : "تنزيل PDF"}</button></div>}
       />
       <section className="panel report-filters">
-        <div className="panel-head"><div><h2><Filter /> تصفية التقرير</h2><p>اختر الخدمات التي لها اشتراكات فعلية وحدد الفترة المطلوبة.</p></div></div>
-        <div className="form-grid two-columns">
-          <label>من تاريخ <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} dir="ltr" /></label>
-          <label>إلى تاريخ <input type="date" value={to} onChange={(event) => setTo(event.target.value)} dir="ltr" /></label>
+        <div className="filter-heading"><div className="filter-heading-icon"><Filter /></div><div><h2>نطاق التقرير</h2><p>خصص الفترة والخدمات قبل إنشاء الملف.</p></div><span>{filteredItems.length} نتيجة</span></div>
+        <div className="filter-fields">
+          <label><span>من تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} dir="ltr" /></div></label>
+          <label><span>إلى تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={to} onChange={(event) => setTo(event.target.value)} dir="ltr" /></div></label>
         </div>
-        <div className="service-filter-list">{availableServices.map((service) => <label key={service}><input type="checkbox" checked={selectedServices.includes(service)} onChange={(event) => setSelectedServices((current) => event.target.checked ? [...current, service] : current.filter((value) => value !== service))} /> {service}</label>)}</div>
+        <div className="filter-section-label"><span>الخدمات المشمولة</span><button type="button" onClick={() => setSelectedServices([])} disabled={!selectedServices.length}>عرض الكل</button></div>
+        <div className="service-filter-list">{availableServices.map((service) => <label key={service} className={selectedServices.includes(service) ? "selected" : ""}><input type="checkbox" checked={selectedServices.includes(service)} onChange={(event) => setSelectedServices((current) => event.target.checked ? [...current, service] : current.filter((value) => value !== service))} /><span className="filter-check"><Check /></span><span>{service}</span></label>)}</div>
       </section>
       <section className="metrics-grid">
         <Metric
@@ -1789,13 +1865,14 @@ function AuditView() {
         subtitle="تفاصيل واضحة لكل إجراء: ماذا حدث، وعلى أي عنصر، ومن نفّذه ومتى"
       />
       <section className="panel audit-filters">
-        <div className="form-grid two-columns">
-          <label>بحث <input value={queryText} onChange={(event) => { setQueryText(event.target.value); setPage(1); }} placeholder="الخدمة أو المستخدم أو وصف الإجراء" /></label>
-          <label>نوع الإجراء <select value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }}>{actions.map((action) => <option key={action}>{action}</option>)}</select></label>
-          <label>من تاريخ <input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} dir="ltr" /></label>
-          <label>إلى تاريخ <input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} dir="ltr" /></label>
+        <div className="filter-heading"><div className="filter-heading-icon"><Filter /></div><div><h2>تصفية السجل</h2><p>اعثر على الإجراء المطلوب بسرعة.</p></div><span>{filteredEvents.length} نتيجة</span></div>
+        <div className="filter-fields audit-filter-fields">
+          <label className="wide-filter"><span>بحث</span><div className="filter-control"><Search /><input value={queryText} onChange={(event) => { setQueryText(event.target.value); setPage(1); }} placeholder="الخدمة أو المستخدم أو وصف الإجراء" /></div></label>
+          <label><span>نوع الإجراء</span><div className="filter-control"><Activity /><select value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }}>{actions.map((action) => <option key={action}>{action}</option>)}</select></div></label>
+          <label><span>من تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} dir="ltr" /></div></label>
+          <label><span>إلى تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} dir="ltr" /></div></label>
         </div>
-        <button className="text-btn" onClick={() => { setQueryText(""); setActionFilter("الكل"); setFrom(""); setTo(""); setPage(1); }}>مسح الفلاتر</button>
+        <div className="filter-footer"><span>يمكن الجمع بين البحث ونوع الإجراء والفترة الزمنية.</span><button className="clear-filters" onClick={() => { setQueryText(""); setActionFilter("الكل"); setFrom(""); setTo(""); setPage(1); }}><X /> مسح الفلاتر</button></div>
       </section>
       <div className="activity-log">
         {visibleEvents.length ? (

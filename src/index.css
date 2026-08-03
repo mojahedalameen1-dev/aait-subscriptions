@@ -2325,11 +2325,36 @@ footer {
 .request-service > .service-logo { margin-left: 0; }
 
 .report-export-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.report-filters, .audit-filters { margin-bottom: 18px; }
-.report-filters .panel-head h2, .dashboard-notifications h2 { display: flex; align-items: center; gap: 8px; }
-.service-filter-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.service-filter-list label { padding: 8px 11px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; cursor: pointer; background: var(--card); }
-.service-filter-list input { accent-color: var(--primary); }
+.report-filters, .audit-filters { margin-bottom: 20px; padding: 0; overflow: hidden; }
+.filter-heading { display: flex; align-items: center; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--primary) 4%, var(--surface)); }
+.filter-heading-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--surface)); }
+.filter-heading-icon svg { width: 18px; }
+.filter-heading > div:nth-child(2) { min-width: 0; }
+.filter-heading h2 { margin: 0; color: inherit; font-size: 14px; }
+.filter-heading p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+.filter-heading > span { margin-inline-start: auto; padding: 6px 10px; border-radius: 999px; background: var(--surface); color: var(--primary); font-size: 10px; font-weight: 700; white-space: nowrap; box-shadow: 0 2px 8px var(--shadow); }
+.filter-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 18px 20px 8px; }
+.audit-filter-fields { grid-template-columns: 1.35fr 1fr 1fr 1fr; }
+.filter-fields label { display: grid; gap: 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+.filter-control { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease; }
+.filter-control:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }
+.filter-control > svg { width: 16px; color: var(--primary); flex: 0 0 auto; }
+.filter-control input, .filter-control select { width: 100%; min-width: 0; height: 40px; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font-size: 12px; }
+.filter-control select { cursor: pointer; }
+.filter-section-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px 0; color: var(--muted); font-size: 10px; font-weight: 600; }
+.filter-section-label button { border: 0; background: transparent; color: var(--primary); font-size: 10px; font-weight: 600; }
+.filter-section-label button:disabled { opacity: .35; cursor: default; }
+.service-filter-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 20px 20px; }
+.service-filter-list label { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 10px; font-size: 10px; cursor: pointer; background: var(--surface); color: var(--muted); transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease; }
+.service-filter-list label.selected { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); background: color-mix(in srgb, var(--primary) 8%, var(--surface)); color: var(--primary); }
+.service-filter-list input { position: absolute; opacity: 0; pointer-events: none; }
+.filter-check { display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); }
+.filter-check svg { width: 11px; opacity: 0; }
+.service-filter-list label.selected .filter-check { border-color: var(--primary); background: var(--primary); color: #fff; }
+.service-filter-list label.selected .filter-check svg { opacity: 1; }
+.filter-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px 17px; color: var(--muted); font-size: 10px; }
+.clear-filters { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--danger) 5%, var(--surface)); color: var(--danger); font-size: 10px; font-weight: 600; }
+.clear-filters svg { width: 14px; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; color: var(--muted); font-size: 11px; }
 .dashboard-notifications { margin-bottom: 20px; }
 .dashboard-notification-list { display: grid; gap: 8px; }
@@ -2365,4 +2390,10 @@ footer {
   .toolbar { align-items: stretch; gap: 10px; flex-direction: column; }
   .filter-select { justify-content: space-between; }
   .report-export-actions { width: 100%; }.report-export-actions .btn { flex: 1; }
+  .filter-heading { padding: 15px; }
+  .filter-fields, .audit-filter-fields { grid-template-columns: 1fr; padding: 15px 15px 6px; }
+  .filter-section-label { padding-inline: 15px; }
+  .service-filter-list { padding: 10px 15px 16px; }
+  .filter-footer { align-items: flex-start; padding-inline: 15px; flex-direction: column; }
+  .clear-filters { min-height: 44px; }
 }
