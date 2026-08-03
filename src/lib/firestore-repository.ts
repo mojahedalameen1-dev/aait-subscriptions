@@ -83,7 +83,7 @@ export async function secureAction<T = { ok: true }>(action:string,payload:Recor
 }
 
 export async function rejectRequest(requestId: string, reason: string) { return secureAction('reject_request',{requestId,reason}) }
-export async function approveRequest(requestId:string,input:{cost:number;billingCycle:string;renewalDate:string;renewalStartDate?:string;category:string;accountEmail:string;accessUrl?:string;assignedTo?:string[]}) { return secureAction('approve_request',{requestId,...input}) }
+export async function approveRequest(requestId:string,input:{cost:number;billingCycle:string;renewalDate:string;renewalStartDate?:string;subscriptionStartDate?:string;category:string;assignedTo?:string[]}) { return secureAction('approve_request',{requestId,...input}) }
 export async function revealCredential(subscriptionId:string) { return secureAction<{ok:true;secret:{username?:string;password?:string;url?:string}}>('reveal_credential',{subscriptionId,confirmed:true}) }
 export async function storeCredential(subscriptionId:string,secret:{username?:string;password?:string;url?:string}) { return secureAction('store_credential',{subscriptionId,secret}) }
 

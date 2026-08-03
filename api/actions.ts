@@ -327,8 +327,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           currency: "SAR",
           billing_cycle: String(payload.billingCycle ?? "شهري"),
           renewal_date: renewalDate,
-          account_email: String(payload.accountEmail ?? ""),
-          access_url: String(payload.accessUrl ?? ""),
           assigned_to:
             Array.isArray(payload.assignedTo) && payload.assignedTo.length
               ? payload.assignedTo
@@ -339,6 +337,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           requested_plan: String(data.requested_plan ?? ""),
           status: "نشط",
           has_stored_credentials: false,
+          start_date: payload.subscriptionStartDate ? Timestamp.fromDate(new Date(String(payload.subscriptionStartDate))) : FieldValue.serverTimestamp(),
           created_by: authUser.uid,
           source_request_id: request.id,
           created_at: FieldValue.serverTimestamp(),

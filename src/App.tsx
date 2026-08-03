@@ -1169,6 +1169,8 @@ function RequestReviewDialog({
 }) {
   const [loading, setLoading] = useState(false);
   const approving = mode === "approve";
+  const suggestedCategory = findServiceBrand(target?.service ?? "")?.category ?? "خدمات أخرى";
+  const today = new Date().toISOString().slice(0, 10);
   return (
     <Dialog.Root open={Boolean(target)} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -1201,9 +1203,8 @@ function RequestReviewDialog({
                   billingCycle: String(form.get("billingCycle") ?? "شهري"),
                   renewalStartDate: String(form.get("renewalStartDate") ?? ""),
                   renewalDate: String(form.get("renewalDate") ?? ""),
+                  subscriptionStartDate: String(form.get("subscriptionStartDate") ?? "").trim(),
                   category: String(form.get("category") ?? "خدمات أخرى"),
-                  accountEmail: String(form.get("accountEmail") ?? target.proposedEmail ?? "").trim(),
-                  accessUrl: String(form.get("accessUrl") ?? "").trim(),
                 });
               } else {
                 const reason = String(form.get("reason") ?? "").trim();
@@ -1223,10 +1224,11 @@ function RequestReviewDialog({
             {approving ? (
               <>
                 <fieldset disabled={loading}>
+                  {target?.type !== "تجديد" && <label>تاريخ الاشتراك <b>*</b><input name="subscriptionStartDate" type="date" required dir="ltr" defaultValue={today} /></label>}
                   <legend>تفاصيل الاشتراك الناتج</legend>
                   <div className="form-grid two-columns">
                     <label>التكلفة بالريال <b>*</b><input name="cost" type="number" min="0" step="0.01" required dir="ltr" /></label>
-                    <label>التصنيف<select name="category" defaultValue="خدمات أخرى"><option>برمجيات وإنتاجية</option><option>استضافة وبنية تحتية</option><option>تصميم وتسويق</option><option>أمن وحماية</option><option>خدمات أخرى</option></select></label>
+                     <label>التصنيف<select name="category" defaultValue={suggestedCategory}><option>برمجيات وإنتاجية</option><option>استضافة وبنية تحتية</option><option>تصميم وتسويق</option><option>أمن وحماية</option><option>خدمات أخرى</option></select></label>
                     <label>دورة الفوترة<select name="billingCycle" defaultValue="شهري"><option>شهري</option><option>ربع سنوي</option><option>نصف سنوي</option><option>سنوي</option><option>مرة واحدة</option></select></label>
                      {target?.type === "تجديد" && <label>بداية الفترة الجديدة <b>*</b><input name="renewalStartDate" type="date" required dir="ltr" defaultValue={target.suggestedStartDate} /></label>}
                      <label>تاريخ التجديد <b>*</b><input name="renewalDate" type="date" required dir="ltr" defaultValue={target?.suggestedRenewalDate} /></label>
