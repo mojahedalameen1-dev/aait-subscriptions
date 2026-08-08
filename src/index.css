@@ -1330,6 +1330,7 @@ footer {
 .section-switcher button.active { background: var(--primary); color: #fff; box-shadow: 0 7px 18px #20b7df35; }
 .permission-panel { animation: view-enter 180ms cubic-bezier(.23,1,.32,1) both; }
 .report-details { margin-top: 18px; }
+.report-filters + .report-details { margin-top: -2px; margin-bottom: 18px; }
 .result-count {
   padding: 7px 11px;
   border-radius: 999px;

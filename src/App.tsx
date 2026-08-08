@@ -1554,6 +1554,24 @@ function ReportsView() {
         <div className="filter-section-label"><span>الخدمات المشمولة</span><button type="button" onClick={() => setSelectedServices([])} disabled={!selectedServices.length}>عرض الكل</button></div>
         <div className="service-filter-list">{availableServices.map((service) => <label key={service} className={selectedServices.includes(service) ? "selected" : ""}><input type="checkbox" checked={selectedServices.includes(service)} onChange={(event) => setSelectedServices((current) => event.target.checked ? [...current, service] : current.filter((value) => value !== service))} /><span className="filter-check"><Check /></span><span>{service}</span></label>)}</div>
       </section>
+      <section className="panel report-details">
+        <div className="panel-head">
+          <div>
+            <h2>تفاصيل الاشتراكات</h2>
+            <p>البيانات المطابقة للخدمات والفترة المحددة، جاهزة للمراجعة والتصدير.</p>
+          </div>
+          <span className="result-count">{filteredItems.length} اشتراك</span>
+        </div>
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>تاريخ انتهاء الاشتراك</th><th>الحالة</th><th>قائد الفريق</th><th>المستفيد</th></tr></thead>
+            <tbody>
+              {filteredItems.map((item) => <tr key={item.id} className={item.status === "منتهٍ" ? "expired-row" : undefined}><td><strong>{item.name}</strong></td><td>{formatSAR(item.price)}</td><td>{item.cycle}</td><td dir="ltr">{item.renewal}</td><td><span className={cn("table-status", item.status === "منتهٍ" && "expired", item.status === "قارب على الانتهاء" && "near")}>{statusLabel(item.status)}</span></td><td>{item.teamLeadName ?? "—"}</td><td>{item.beneficiaryName ?? "—"}</td></tr>)}
+              {!filteredItems.length && <tr><td colSpan={7} className="table-empty">لا توجد اشتراكات مطابقة للفلاتر الحالية.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
       <section className="metrics-grid">
         <Metric
           icon={CircleDollarSign}
@@ -1597,24 +1615,6 @@ function ReportsView() {
             />
           </BarChart>
         </ResponsiveContainer>
-      </section>
-      <section className="panel report-details">
-        <div className="panel-head">
-          <div>
-            <h2>تفاصيل الاشتراكات</h2>
-            <p>البيانات المطابقة للخدمات والفترة المحددة، جاهزة للمراجعة والتصدير.</p>
-          </div>
-          <span className="result-count">{filteredItems.length} اشتراك</span>
-        </div>
-        <div className="data-table-wrap">
-          <table className="data-table">
-            <thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>تاريخ انتهاء الاشتراك</th><th>الحالة</th><th>قائد الفريق</th><th>المستفيد</th></tr></thead>
-            <tbody>
-              {filteredItems.map((item) => <tr key={item.id} className={item.status === "منتهٍ" ? "expired-row" : undefined}><td><strong>{item.name}</strong></td><td>{formatSAR(item.price)}</td><td>{item.cycle}</td><td dir="ltr">{item.renewal}</td><td><span className={cn("table-status", item.status === "منتهٍ" && "expired", item.status === "قارب على الانتهاء" && "near")}>{statusLabel(item.status)}</span></td><td>{item.teamLeadName ?? "—"}</td><td>{item.beneficiaryName ?? "—"}</td></tr>)}
-              {!filteredItems.length && <tr><td colSpan={7} className="table-empty">لا توجد اشتراكات مطابقة للفلاتر الحالية.</td></tr>}
-            </tbody>
-          </table>
-        </div>
       </section>
     </>
   );
