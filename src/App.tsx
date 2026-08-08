@@ -81,6 +81,7 @@ import {
   deleteRole,
   deleteUser,
   ensureUserProfile,
+  getBudgetSettings,
   listAllRequests,
   listAllSubscriptions,
   listAuditLogs,
@@ -92,6 +93,8 @@ import {
   listUsers,
   markNotificationRead,
   markAllNotificationsRead,
+  saveBudgetSettings,
+  syncBudgetAlerts,
   syncSubscriptionAlerts,
   activateSuperAdmin,
   grantSystemOwner,
@@ -1115,7 +1118,7 @@ function Dashboard({ permissions }: { permissions: string[] }) {
       <section className="panel dashboard-notifications">
         <div className="panel-head"><div><h2><Bell /> تنبيهات تحتاج إلى متابعة</h2><p>أحدث التنبيهات المهمة وغير المقروءة.</p></div><button className="text-btn" onClick={() => document.querySelector<HTMLButtonElement>(".bell")?.click()}>فتح مركز التنبيهات <ChevronLeft size={16} /></button></div>
         <div className="dashboard-notification-list">
-          {notifications.filter((item) => !item.read).sort((a,b) => Number(b.created_at?.toDate() ?? 0) - Number(a.created_at?.toDate() ?? 0)).slice(0, 4).map((item) => <button key={item.id} className={cn("dashboard-notification", item.priority === "high" && "important")} onClick={async () => { await markNotificationRead(item.id); await queryClient.invalidateQueries({queryKey:["notifications"]}); if (item.request_id) useAppStore.getState().setView("requests"); else if (item.subscription_id) useAppStore.getState().setView("subscriptions"); }}><Bell /><span><strong>{item.title}</strong><small>{item.body}</small></span></button>)}
+          {notifications.filter((item) => !item.read).sort((a,b) => Number(b.created_at?.toDate() ?? 0) - Number(a.created_at?.toDate() ?? 0)).slice(0, 4).map((item) => <button key={item.id} className={cn("dashboard-notification", item.priority === "high" && "important")} onClick={async () => { await markNotificationRead(item.id); await queryClient.invalidateQueries({queryKey:["notifications"]}); if (item.request_id) useAppStore.getState().setView("requests"); else if (item.subscription_id) useAppStore.getState().setView("subscriptions"); else if (item.alert_kind?.startsWith("budget_")) useAppStore.getState().setView("reports"); }}><Bell /><span><strong>{item.title}</strong><small>{item.body}</small></span></button>)}
           {!notifications.some((item) => !item.read) && <div className="inline-empty">لا توجد تنبيهات جديدة تحتاج إلى إجراء.</div>}
         </div>
       </section>
@@ -1439,7 +1442,73 @@ function RequestsView({ permissions }: { permissions: string[] }) {
     </>
   );
 }
-function ReportsView() {
+function BudgetOverview({ monthlyUsage, annualUsage, canManage }: { monthlyUsage: number; annualUsage: number; canManage: boolean }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const { data: budget = { monthly_budget: 0, annual_budget: 0 } } = useQuery({
+    queryKey: ["budgets"],
+    queryFn: getBudgetSettings,
+    enabled: firebaseReady,
+  });
+  const budgetCards = [
+    { key: "monthly", title: "الميزانية الشهرية", usage: monthlyUsage, limit: budget.monthly_budget, description: "التكلفة الشهرية المعادلة للاشتراكات الدورية" },
+    { key: "annual", title: "الميزانية السنوية", usage: annualUsage, limit: budget.annual_budget, description: "الالتزام السنوي المتوقع للمحفظة الحالية" },
+  ];
+  const save = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const monthlyBudget = Number(data.get("monthlyBudget") ?? 0);
+    const annualBudget = Number(data.get("annualBudget") ?? 0);
+    if (monthlyBudget < 0 || annualBudget < 0) return toast.error("يجب ألا تقل الميزانية عن صفر");
+    setSaving(true);
+    try {
+      await saveBudgetSettings(monthlyBudget, annualBudget);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["budgets"] }),
+        queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+      ]);
+      setOpen(false);
+      toast.success("تم حفظ الميزانيات وتحديث التنبيهات");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر حفظ الميزانية");
+    } finally { setSaving(false); }
+  };
+  return (
+    <section className="panel budget-overview" aria-labelledby="budget-title">
+      <div className="budget-heading">
+        <div><span className="budget-heading-icon"><Gauge /></span><div><h2 id="budget-title">الميزانيات والحدود المالية</h2><p>راقب الاستهلاك قبل أن يتحول إلى تجاوز غير متوقع.</p></div></div>
+        {canManage ? <button type="button" className="btn secondary compact" onClick={() => setOpen(true)}><SlidersHorizontal /> ضبط الميزانية</button> : null}
+      </div>
+      <div className="budget-grid">
+        {budgetCards.map((card) => {
+          const percentage = card.limit > 0 ? Math.round((card.usage / card.limit) * 100) : 0;
+          const state = !card.limit ? "unset" : percentage > 100 ? "exceeded" : percentage >= 80 ? "warning" : "safe";
+          const remaining = Math.max(card.limit - card.usage, 0);
+          return <article className={cn("budget-card", state)} key={card.key}>
+            <div className="budget-card-top"><div><small>{card.title}</small><strong><AnimatedNumber value={card.usage} formatter={formatSAR} /></strong></div><span className="budget-state">{state === "unset" ? "غير محددة" : state === "exceeded" ? "تجاوز الحد" : state === "warning" ? "قريبة من الحد" : "ضمن الميزانية"}</span></div>
+            <div className="budget-progress" role="progressbar" aria-label={card.title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(percentage, 100)}><span style={{ width: `${Math.min(percentage, 100)}%` }} /></div>
+            <div className="budget-card-bottom"><p>{card.description}</p>{card.limit > 0 ? <div><span>{percentage}% مستخدم</span><span>{state === "exceeded" ? `تجاوز بقيمة ${formatSAR(card.usage - card.limit)}` : `متبقي ${formatSAR(remaining)}`}</span><span>الحد {formatSAR(card.limit)}</span></div> : <div><span>حدد حدًا لتفعيل التنبيهات</span></div>}</div>
+          </article>;
+        })}
+      </div>
+      <Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content budget-dialog" dir="rtl">
+        <div className="dialog-heading"><div className="dialog-icon"><CircleDollarSign /></div><div><Dialog.Title>ضبط الميزانيات</Dialog.Title><Dialog.Description>ستصل تنبيهات عند بلوغ 80% وعند تجاوز الحد.</Dialog.Description></div></div>
+        <form onSubmit={save}>
+          <div className="budget-form-grid">
+            <label><span>الميزانية الشهرية</span><div className="money-input"><input name="monthlyBudget" type="number" min="0" step="1" defaultValue={budget.monthly_budget || ""} placeholder="مثال: 10000" dir="ltr" /><b>ر.س</b></div><small>ضع 0 لتعطيل الحد الشهري.</small></label>
+            <label><span>الميزانية السنوية</span><div className="money-input"><input name="annualBudget" type="number" min="0" step="1" defaultValue={budget.annual_budget || ""} placeholder="مثال: 120000" dir="ltr" /><b>ر.س</b></div><small>يشمل الالتزام السنوي المتوقع.</small></label>
+          </div>
+          <div className="budget-dialog-note"><Bell /> ستُرسل التنبيهات إلى أصحاب صلاحية عرض التقارير المالية.</div>
+          <div className="dialog-actions"><Dialog.Close asChild><button type="button" className="btn secondary">إلغاء</button></Dialog.Close><button className="btn primary" disabled={saving}>{saving ? "جارٍ الحفظ..." : "حفظ الميزانيات"}</button></div>
+        </form>
+        <Dialog.Close className="dialog-close" aria-label="إغلاق"><X /></Dialog.Close>
+      </Dialog.Content></Dialog.Portal></Dialog.Root>
+    </section>
+  );
+}
+
+function ReportsView({ canManageBudget }: { canManageBudget: boolean }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [detailSearch, setDetailSearch] = useState("");
@@ -1470,6 +1539,13 @@ function ReportsView() {
   const availableCycles = useMemo(() => [...new Set(items.map((item) => item.cycle))].sort(), [items]);
   const availableTeamLeads = useMemo(() => [...new Set(items.map((item) => item.teamLeadName).filter(Boolean) as string[])].sort(), [items]);
   const availableBeneficiaries = useMemo(() => [...new Set(items.map((item) => item.beneficiaryName).filter(Boolean) as string[])].sort(), [items]);
+  const budgetUsage = useMemo(() => {
+    const current = items.filter((item) => item.status !== "ملغى" && item.status !== "منتهٍ");
+    return {
+      monthly: Math.round(current.reduce((sum, item) => sum + monthlyEquivalent(item), 0)),
+      annual: Math.round(current.reduce((sum, item) => sum + annualEquivalent(item), 0)),
+    };
+  }, [items]);
   const filteredItems = useMemo(() => items.filter((item) => {
     const date = item.renewalDate;
     const searchable = `${item.name} ${item.category ?? ""} ${item.teamLeadName ?? ""} ${item.beneficiaryName ?? ""}`.toLowerCase();
@@ -1675,6 +1751,7 @@ function ReportsView() {
           </DropdownMenu.Root>
         }
       />
+      <BudgetOverview monthlyUsage={budgetUsage.monthly} annualUsage={budgetUsage.annual} canManage={canManageBudget} />
       <section className="panel report-filters">
         <div className="filter-heading"><div className="filter-heading-icon"><Filter /></div><div><h2>نطاق التقرير</h2><p>اختر نطاقًا سريعًا أو خصص البيانات بدقة.</p></div><span><AnimatedNumber value={filteredItems.length} /> نتيجة</span></div>
         <div className="report-presets" aria-label="فترات جاهزة">
@@ -2519,6 +2596,7 @@ function Header({
                       }
                       if (item.request_id) useAppStore.getState().setView("requests");
                       else if (item.subscription_id) useAppStore.getState().setView("subscriptions");
+                      else if (item.alert_kind?.startsWith("budget_")) useAppStore.getState().setView("reports");
                     }}
                   >
                     <span>
@@ -2763,6 +2841,7 @@ export default function App() {
           audit: ["audit"],
           roles: ["roles"],
           users: ["users"],
+          budgets: ["budgets"],
         };
         (queryKeys[collectionName] ?? []).forEach((queryKey) => {
           void queryClient.invalidateQueries({ queryKey: [queryKey] });
@@ -2789,6 +2868,12 @@ export default function App() {
   useEffect(() => {
     if (!firebaseReady || !authenticated || !permissions.includes("view_subscriptions")) return;
     void syncSubscriptionAlerts()
+      .then(() => queryClient.invalidateQueries({ queryKey: ["notifications"] }))
+      .catch(() => undefined);
+  }, [authenticated, permissions, queryClient]);
+  useEffect(() => {
+    if (!firebaseReady || !authenticated || !permissions.includes("view_financial_reports")) return;
+    void syncBudgetAlerts()
       .then(() => queryClient.invalidateQueries({ queryKey: ["notifications"] }))
       .catch(() => undefined);
   }, [authenticated, permissions, queryClient]);
@@ -2854,7 +2939,7 @@ export default function App() {
         dashboard: <Dashboard permissions={permissions} />,
         subscriptions: <SubscriptionsView permissions={permissions} />,
         requests: <RequestsView permissions={permissions} />,
-        reports: <ReportsView />,
+        reports: <ReportsView canManageBudget={permissions.includes("manage_subscriptions") || Boolean(profile?.is_owner)} />,
         roles: <RolesView canGrantOwner={Boolean(profile?.is_owner)} canDeleteUsers={profile?.email?.toLowerCase() === "asimesmat1@gmail.com"} />,
         audit: <AuditView />,
       })[safeView],

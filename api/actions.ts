@@ -97,6 +97,70 @@ function normalizeServiceName(value: unknown) {
   return raw;
 }
 
+function recurringMonthlyCost(price: number, cycle: string) {
+  if (cycle === "مرة واحدة") return 0;
+  const months = cycle === "شهري" ? 1 : cycle === "ربع سنوي" ? 3 : cycle === "نصف سنوي" ? 6 : 12;
+  return price / months;
+}
+
+async function syncBudgetNotifications(db: ReturnType<typeof getFirestore>) {
+  const [config, subscriptions, administrators] = await Promise.all([
+    db.doc("system/config").get(),
+    db.collection("subscriptions").get(),
+    db.collection("users").where("permissions", "array-contains", "view_financial_reports").get(),
+  ]);
+  const monthlyBudget = Number(config.data()?.monthly_budget ?? 0);
+  const annualBudget = Number(config.data()?.annual_budget ?? 0);
+  if ((!monthlyBudget && !annualBudget) || administrators.empty) return 0;
+  const now = new Date();
+  let monthlyUsage = 0;
+  let annualUsage = 0;
+  subscriptions.docs.forEach((snapshot) => {
+    const data = snapshot.data();
+    const renewal = data.renewal_date?.toDate?.() as Date | undefined;
+    if (data.status === "ملغى" || data.status === "منتهٍ" || (renewal && renewal.getTime() < now.getTime())) return;
+    const price = Number(data.price ?? 0);
+    const cycle = String(data.billing_cycle ?? "شهري");
+    const monthlyCost = recurringMonthlyCost(price, cycle);
+    monthlyUsage += monthlyCost;
+    annualUsage += cycle === "مرة واحدة" ? price : monthlyCost * 12;
+  });
+  const periodKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const yearKey = String(now.getFullYear());
+  const checks = [
+    { kind: "monthly", label: "الشهرية", usage: monthlyUsage, budget: monthlyBudget, period: periodKey },
+    { kind: "annual", label: "السنوية", usage: annualUsage, budget: annualBudget, period: yearKey },
+  ].filter((item) => item.budget > 0 && item.usage >= item.budget * 0.8);
+  let created = 0;
+  for (const check of checks) {
+    const exceeded = check.usage > check.budget;
+    const alertLevel = exceeded ? "exceeded" : "warning";
+    const percentage = Math.round((check.usage / check.budget) * 100);
+    for (const administrator of administrators.docs) {
+      const ref = db.doc(`notifications/budget-${check.kind}-${alertLevel}-${check.period}-${administrator.id}`);
+      if ((await ref.get()).exists) continue;
+      try {
+        await ref.create({
+          user_id: administrator.id,
+          title: exceeded ? `تم تجاوز الميزانية ${check.label}` : `الميزانية ${check.label} تقترب من الحد`,
+          body: exceeded
+            ? `بلغ الاستخدام ${Math.round(check.usage).toLocaleString("en-US")} ر.س، متجاوزًا الحد المحدد ${Math.round(check.budget).toLocaleString("en-US")} ر.س.`
+            : `وصل استهلاك الميزانية ${check.label} إلى ${percentage}% من الحد المحدد.`,
+          read: false,
+          priority: exceeded ? "high" : "normal",
+          alert_kind: `budget_${check.kind}_${alertLevel}`,
+          created_at: FieldValue.serverTimestamp(),
+        });
+        created += 1;
+      } catch (error) {
+        const code = (error as { code?: number | string }).code;
+        if (code !== 6 && code !== "already-exists") throw error;
+      }
+    }
+  }
+  return created;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin ?? "";
   const allowedOrigins = [
@@ -157,6 +221,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         permissions: ALL_SYSTEM_PERMISSIONS,
         is_owner: true,
       });
+    }
+
+    if (action === "save_budget_settings") {
+      allow(profile, "manage_subscriptions");
+      const monthlyBudget = Number(payload.monthlyBudget ?? 0);
+      const annualBudget = Number(payload.annualBudget ?? 0);
+      if (!Number.isFinite(monthlyBudget) || monthlyBudget < 0 || !Number.isFinite(annualBudget) || annualBudget < 0)
+        throw new Error("قيم الميزانية غير صالحة");
+      await db.doc("system/config").set({
+        monthly_budget: monthlyBudget,
+        annual_budget: annualBudget,
+        updated_by: authUser.uid,
+        updated_by_name: profile.name ?? authUser.email,
+        updated_at: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      await db.collection("audit_logs").add({
+        action: "تحديث الميزانيات",
+        entity_type: "إعدادات مالية",
+        entity_name: "الميزانية الشهرية والسنوية",
+        actor_uid: authUser.uid,
+        actor_name: profile.name ?? authUser.email,
+        summary: `تم ضبط الميزانية الشهرية على ${monthlyBudget} ر.س والسنوية على ${annualBudget} ر.س.`,
+        created_at: FieldValue.serverTimestamp(),
+      });
+      await syncBudgetNotifications(db);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === "sync_budget_alerts") {
+      allow(profile, "view_financial_reports");
+      const created = await syncBudgetNotifications(db);
+      return res.status(200).json({ ok: true, created });
     }
 
     if (action === "sync_subscription_alerts") {
@@ -478,6 +574,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           created_at: FieldValue.serverTimestamp(),
         });
       });
+      await syncBudgetNotifications(db).catch(() => 0);
       return res
         .status(200)
         .json({ ok: true, subscriptionId: subscriptionRef.id });
@@ -526,6 +623,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           summary: `تمت إضافة اشتراك «${name}» بتكلفة ${price} ر.س ودورة فوترة ${String(payload.billingCycle ?? "شهري")}.`,
           created_at: FieldValue.serverTimestamp(),
         });
+      await syncBudgetNotifications(db).catch(() => 0);
       return res.status(200).json({ ok: true, subscriptionId: ref.id });
     }
 
@@ -574,6 +672,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           summary: `تم تحديث بيانات اشتراك «${String(allowedChanges.name ?? existingSubscription.data()?.name ?? "اشتراك")}».`,
           created_at: FieldValue.serverTimestamp(),
         });
+      await syncBudgetNotifications(db).catch(() => 0);
       return res.status(200).json({ ok: true });
     }
 
@@ -603,6 +702,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           summary: `تم حذف اشتراك «${subscriptionName}» وبيانات الدخول المرتبطة به نهائيًا.`,
           created_at: FieldValue.serverTimestamp(),
         });
+      await syncBudgetNotifications(db).catch(() => 0);
       return res.status(200).json({ ok: true });
     }
 

@@ -7,7 +7,8 @@ export type SubscriptionRecord = { id: string; name: string; category?: string; 
 export type RequestRecord = { id: string; type: 'new'|'renewal'; service_name: string; purpose: string; notes?: string; requested_by: string; requester_name?: string; beneficiary_name?: string; requested_plan?: string; requested_access?: string; proposed_account_email?: string; proposed_password?: string; related_subscription_id?: string; suggested_start_date?: string; suggested_renewal_date?: string; status: 'قيد المراجعة'|'مكتمل'|'مرفوض'; rejection_reason?: string; created_at?: { toDate(): Date } }
 export type RoleRecord = { id: string; name: string; permissions: string[]; protected?: boolean }
 export type AuditRecord = { id: string; action: string; entity_id: string; entity_type?: string; entity_name?: string; actor_name?: string; details?: string; summary?: string; created_at?: { toDate(): Date } }
-export type NotificationRecord = { id: string; title: string; body: string; read: boolean; priority?: 'high'|'normal'; request_id?: string; subscription_id?: string; created_at?: { toDate(): Date } }
+export type NotificationRecord = { id: string; title: string; body: string; read: boolean; priority?: 'high'|'normal'; request_id?: string; subscription_id?: string; alert_kind?: string; created_at?: { toDate(): Date } }
+export type BudgetSettings = { monthly_budget: number; annual_budget: number; updated_at?: { toDate(): Date }; updated_by_name?: string }
 
 function requireContext() { if (!db || !auth?.currentUser) throw new Error('Firebase غير متصل'); return { db, user: auth.currentUser } }
 
@@ -48,11 +49,14 @@ export async function listRoles() { const { db } = requireContext(); return rows
 export async function listUsers() { const { db } = requireContext(); return rows<UserProfile>(await getDocs(collection(db,'users'))) }
 export async function listAuditLogs() { const { db } = requireContext(); return rows<AuditRecord>(await getDocs(query(collection(db,'audit_logs'),orderBy('created_at','desc')))) }
 export async function listNotifications() { const { db, user } = requireContext(); return rows<NotificationRecord>(await getDocs(query(collection(db,'notifications'),where('user_id','==',user.uid)))) }
+export async function getBudgetSettings(): Promise<BudgetSettings> { const { db } = requireContext(); const snapshot = await getDoc(doc(db,'system','config')); const data = snapshot.data() ?? {}; return { monthly_budget: Number(data.monthly_budget ?? 0), annual_budget: Number(data.annual_budget ?? 0), updated_at: data.updated_at, updated_by_name: data.updated_by_name } }
 
 /** Keeps visible data fresh without manual refreshes. Restricted collections fail independently. */
 export function subscribeRealtime(onChange: (collectionName: string) => void) {
   const { db, user } = requireContext()
   const safeListen = (target: ReturnType<typeof collection> | ReturnType<typeof query>, name: string) =>
+    onSnapshot(target, () => onChange(name), () => undefined)
+  const safeListenDoc = (target: ReturnType<typeof doc>, name: string) =>
     onSnapshot(target, () => onChange(name), () => undefined)
   const unsubs = [
     safeListen(collection(db, 'subscriptions'), 'subscriptions'),
@@ -60,6 +64,7 @@ export function subscribeRealtime(onChange: (collectionName: string) => void) {
     safeListen(collection(db, 'audit_logs'), 'audit'),
     safeListen(collection(db, 'roles'), 'roles'),
     safeListen(collection(db, 'users'), 'users'),
+    safeListenDoc(doc(db, 'system', 'config'), 'budgets'),
     safeListen(query(collection(db, 'notifications'), where('user_id', '==', user.uid)), 'notifications'),
   ]
   return () => unsubs.forEach((unsubscribe) => unsubscribe())
@@ -72,6 +77,8 @@ export async function deleteSubscription(subscriptionId:string) { return secureA
 export async function markNotificationRead(id:string) { const { db } = requireContext(); return updateDoc(doc(db,'notifications',id),{read:true}) }
 export async function markAllNotificationsRead() { const { db, user } = requireContext(); const snapshot = await getDocs(query(collection(db,'notifications'),where('user_id','==',user.uid),where('read','==',false))); await Promise.all(snapshot.docs.map((item) => updateDoc(item.ref,{read:true}))) }
 export async function syncSubscriptionAlerts() { return secureAction<{ok:true;created:number}>('sync_subscription_alerts',{}) }
+export async function syncBudgetAlerts() { return secureAction<{ok:true;created:number}>('sync_budget_alerts',{}) }
+export async function saveBudgetSettings(monthlyBudget: number, annualBudget: number) { return secureAction<{ok:true}>('save_budget_settings',{monthlyBudget,annualBudget}) }
 export async function activateSuperAdmin() { return secureAction<UserProfile>('activate_super_admin',{}) }
 
 export async function secureAction<T = { ok: true }>(action:string,payload:Record<string,unknown>):Promise<T> {
