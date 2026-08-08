@@ -1059,6 +1059,13 @@ function Dashboard({ permissions }: { permissions: string[] }) {
   );
   const active = items.filter((x) => x.status === "نشط").length;
   const near = items.filter((x) => x.status === "قارب على الانتهاء").length;
+  const budgetUsage = useMemo(() => {
+    const current = items.filter((item) => item.status !== "ملغى" && item.status !== "منتهٍ");
+    return {
+      monthly: Math.round(current.reduce((sum, item) => sum + monthlyEquivalent(item), 0)),
+      annual: Math.round(current.reduce((sum, item) => sum + annualEquivalent(item), 0)),
+    };
+  }, [items]);
   const forecastData = monthlySeries(monthlyTotal);
   const cycleNames = [...new Set(items.map((x) => x.cycle))];
   const cycleData = cycleNames.map((name, index) => {
@@ -1084,6 +1091,7 @@ function Dashboard({ permissions }: { permissions: string[] }) {
         </div>
         <NewRequestButton />
       </section>
+      {permissions.includes("view_financial_reports") ? <BudgetOverview monthlyUsage={budgetUsage.monthly} annualUsage={budgetUsage.annual} canManage={permissions.includes("manage_subscriptions")} /> : null}
       <section className="metrics-grid">
         <Metric
           icon={WalletCards}
@@ -1508,7 +1516,7 @@ function BudgetOverview({ monthlyUsage, annualUsage, canManage }: { monthlyUsage
   );
 }
 
-function ReportsView({ canManageBudget }: { canManageBudget: boolean }) {
+function ReportsView() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [detailSearch, setDetailSearch] = useState("");
@@ -1539,13 +1547,6 @@ function ReportsView({ canManageBudget }: { canManageBudget: boolean }) {
   const availableCycles = useMemo(() => [...new Set(items.map((item) => item.cycle))].sort(), [items]);
   const availableTeamLeads = useMemo(() => [...new Set(items.map((item) => item.teamLeadName).filter(Boolean) as string[])].sort(), [items]);
   const availableBeneficiaries = useMemo(() => [...new Set(items.map((item) => item.beneficiaryName).filter(Boolean) as string[])].sort(), [items]);
-  const budgetUsage = useMemo(() => {
-    const current = items.filter((item) => item.status !== "ملغى" && item.status !== "منتهٍ");
-    return {
-      monthly: Math.round(current.reduce((sum, item) => sum + monthlyEquivalent(item), 0)),
-      annual: Math.round(current.reduce((sum, item) => sum + annualEquivalent(item), 0)),
-    };
-  }, [items]);
   const filteredItems = useMemo(() => items.filter((item) => {
     const date = item.renewalDate;
     const searchable = `${item.name} ${item.category ?? ""} ${item.teamLeadName ?? ""} ${item.beneficiaryName ?? ""}`.toLowerCase();
@@ -1751,7 +1752,6 @@ function ReportsView({ canManageBudget }: { canManageBudget: boolean }) {
           </DropdownMenu.Root>
         }
       />
-      <BudgetOverview monthlyUsage={budgetUsage.monthly} annualUsage={budgetUsage.annual} canManage={canManageBudget} />
       <section className="panel report-filters">
         <div className="filter-heading"><div className="filter-heading-icon"><Filter /></div><div><h2>نطاق التقرير</h2><p>اختر نطاقًا سريعًا أو خصص البيانات بدقة.</p></div><span><AnimatedNumber value={filteredItems.length} /> نتيجة</span></div>
         <div className="report-presets" aria-label="فترات جاهزة">
@@ -2939,7 +2939,7 @@ export default function App() {
         dashboard: <Dashboard permissions={permissions} />,
         subscriptions: <SubscriptionsView permissions={permissions} />,
         requests: <RequestsView permissions={permissions} />,
-        reports: <ReportsView canManageBudget={permissions.includes("manage_subscriptions") || Boolean(profile?.is_owner)} />,
+        reports: <ReportsView />,
         roles: <RolesView canGrantOwner={Boolean(profile?.is_owner)} canDeleteUsers={profile?.email?.toLowerCase() === "asimesmat1@gmail.com"} />,
         audit: <AuditView />,
       })[safeView],
