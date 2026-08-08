@@ -565,6 +565,8 @@ main {
   border: 1px solid var(--border);
   border-radius: 15px;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
   transition: 0.2s;
 }
 .subscription-card.subscription-expired {
@@ -687,9 +689,44 @@ main {
 .subscription-meta small.urgent {
   color: var(--danger);
 }
+.subscription-people {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin: 0 0 14px;
+}
+.subscription-person {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 13%, var(--border));
+  border-radius: 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 6%, var(--surface)), var(--surface));
+}
+.person-avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.person-avatar svg { width: 15px; }
+.person-avatar.leader { color: #9a6508; background: color-mix(in srgb, #eaa928 17%, var(--surface)); }
+.person-avatar.beneficiary { color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, var(--surface)); }
+.person-copy { display: grid; gap: 2px; min-width: 0; }
+.person-copy small { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.person-copy small svg { width: 11px; }
+.person-copy strong { display: -webkit-box; overflow: hidden; color: var(--text); font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.subscription-person.empty { opacity: .66; border-style: dashed; }
 .card-actions {
   justify-content: flex-start;
   gap: 6px;
+  margin-top: auto;
 }
 .card-actions .btn {
   height: 33px;

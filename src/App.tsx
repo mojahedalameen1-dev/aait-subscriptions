@@ -811,7 +811,28 @@ function SubscriptionCard({
           </small>
         </div>
       </div>
-      {(item.teamLeadName || item.beneficiaryName) && <div className="subscription-people"><span>قائد الفريق: <strong>{item.teamLeadName ?? "—"}</strong></span><span>المهندس المستفيد: <strong>{item.beneficiaryName ?? "—"}</strong></span></div>}
+      {(item.teamLeadName || item.beneficiaryName) && (
+        <div className="subscription-people" aria-label="فريق الاشتراك">
+          <div className={cn("subscription-person", !item.teamLeadName && "empty")}>
+            <span className="person-avatar leader" aria-hidden="true">
+              {item.teamLeadName?.trim().charAt(0).toUpperCase() || <Crown />}
+            </span>
+            <span className="person-copy">
+              <small><Crown /> قائد الفريق</small>
+              <strong><bdi dir="auto">{item.teamLeadName || "غير محدد"}</bdi></strong>
+            </span>
+          </div>
+          <div className={cn("subscription-person", !item.beneficiaryName && "empty")}>
+            <span className="person-avatar beneficiary" aria-hidden="true">
+              {item.beneficiaryName?.trim().charAt(0).toUpperCase() || <Users />}
+            </span>
+            <span className="person-copy">
+              <small><Users /> المهندس المستفيد</small>
+              <strong><bdi dir="auto">{item.beneficiaryName || "غير محدد"}</bdi></strong>
+            </span>
+          </div>
+        </div>
+      )}
       {secret && <p className="credential-value">{secret}</p>}
       <div className="card-actions">
         <button
