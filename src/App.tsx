@@ -90,6 +90,8 @@ import {
   listUsers,
   markNotificationRead,
   markAllNotificationsRead,
+  syncSubscriptionAlerts,
+  activateSuperAdmin,
   grantSystemOwner,
   rejectRequest,
   revealCredential,
@@ -176,9 +178,11 @@ const mapSubscription = (item: SubscriptionRecord, index = 0): Subscription => {
   const status: Status =
     item.status === "ملغى"
       ? "ملغى"
+      : !renewal
+        ? item.status === "منتهٍ" ? "منتهٍ" : "نشط"
       : days < 0
         ? "منتهٍ"
-        : days <= 30
+        : days <= 3
           ? "قارب على الانتهاء"
           : "نشط";
   return {
@@ -241,6 +245,7 @@ const permissionLabels: Record<(typeof ALL_PERMISSIONS)[number], string> = {
   view_audit_log: "عرض سجل التحركات",
 };
 
+const statusLabel = (status: Status | RequestStatus) => status === "منتهٍ" ? "اشتراك منتهي" : status;
 function StatusBadge({ status }: { status: Status | RequestStatus }) {
   return (
     <span
@@ -254,7 +259,7 @@ function StatusBadge({ status }: { status: Status | RequestStatus }) {
       )}
     >
       <span />
-      {status}
+      {statusLabel(status)}
     </span>
   );
 }
@@ -736,7 +741,7 @@ function SubscriptionCard({
     }
   };
   return (
-    <article className="subscription-card">
+    <article className={cn("subscription-card", item.status === "منتهٍ" && "subscription-expired")}>
       <div className="subscription-top">
         <ServiceLogo name={item.name} fallback={item.short} color={item.color} />
         <div className="service-title">
@@ -757,10 +762,10 @@ function SubscriptionCard({
           <small> / {item.cycle}</small>
         </div>
         <div>
-          <span>التجديد القادم</span>
+          <span>تاريخ انتهاء الاشتراك</span>
           <strong>{item.renewal}</strong>
-          <small className={item.days < 10 ? "urgent" : ""}>
-            {item.days < 0 ? "منتهي" : `متبقي ${item.days} يومًا`}
+          <small className={item.days <= 3 ? "urgent" : ""}>
+            {item.days < 0 ? "اشتراك منتهي" : `متبقي ${item.days} يومًا`}
           </small>
         </div>
       </div>
@@ -987,9 +992,7 @@ function Dashboard({ permissions }: { permissions: string[] }) {
     ),
   );
   const active = items.filter((x) => x.status === "نشط").length;
-  const near = items.filter(
-    (x) => x.status === "قارب على الانتهاء" || x.status === "منتهٍ",
-  ).length;
+  const near = items.filter((x) => x.status === "قارب على الانتهاء").length;
   const forecastData = monthlySeries(monthlyTotal);
   const cycleNames = [...new Set(items.map((x) => x.cycle))];
   const cycleData = cycleNames.map((name, index) => {
@@ -1033,7 +1036,7 @@ function Dashboard({ permissions }: { permissions: string[] }) {
           icon={Clock3}
           title="تجديدات قريبة"
           value={String(near)}
-          trend="منتهية أو خلال 30 يومًا"
+          trend="تنتهي خلال 3 أيام أو أقل"
           tone="orange"
         />
         <Metric
@@ -1131,7 +1134,7 @@ function Dashboard({ permissions }: { permissions: string[] }) {
       <section className="section-head">
         <div>
           <h2>تحتاج انتباهك</h2>
-          <p>الاشتراكات القريبة من التجديد أو المنتهية</p>
+          <p>الاشتراكات التي تنتهي خلال 3 أيام أو انتهت بالفعل</p>
         </div>
         <button
           className="text-btn"
@@ -1376,6 +1379,13 @@ function RequestsView({ permissions }: { permissions: string[] }) {
 function ReportsView() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [detailSearch, setDetailSearch] = useState("");
+  const [detailStatus, setDetailStatus] = useState("الكل");
+  const [detailCycle, setDetailCycle] = useState("الكل");
+  const [detailTeamLead, setDetailTeamLead] = useState("الكل");
+  const [detailBeneficiary, setDetailBeneficiary] = useState("الكل");
+  const [minimumPrice, setMinimumPrice] = useState("");
+  const [maximumPrice, setMaximumPrice] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
   const { data: items = subscriptions } = useQuery({
@@ -1386,10 +1396,33 @@ function ReportsView() {
         : subscriptions,
   });
   const availableServices = useMemo(() => [...new Set(items.map((item) => item.name))].sort(), [items]);
+  const availableCycles = useMemo(() => [...new Set(items.map((item) => item.cycle))].sort(), [items]);
+  const availableTeamLeads = useMemo(() => [...new Set(items.map((item) => item.teamLeadName).filter(Boolean) as string[])].sort(), [items]);
+  const availableBeneficiaries = useMemo(() => [...new Set(items.map((item) => item.beneficiaryName).filter(Boolean) as string[])].sort(), [items]);
   const filteredItems = useMemo(() => items.filter((item) => {
     const date = item.renewalDate;
-    return (!selectedServices.length || selectedServices.includes(item.name)) && (!from || date >= from) && (!to || date <= to);
-  }), [items, selectedServices, from, to]);
+    const searchable = `${item.name} ${item.category ?? ""} ${item.teamLeadName ?? ""} ${item.beneficiaryName ?? ""}`.toLowerCase();
+    return (!selectedServices.length || selectedServices.includes(item.name))
+      && (!from || date >= from)
+      && (!to || date <= to)
+      && (!detailSearch || searchable.includes(detailSearch.trim().toLowerCase()))
+      && (detailStatus === "الكل" || item.status === detailStatus)
+      && (detailCycle === "الكل" || item.cycle === detailCycle)
+      && (detailTeamLead === "الكل" || item.teamLeadName === detailTeamLead)
+      && (detailBeneficiary === "الكل" || item.beneficiaryName === detailBeneficiary)
+      && (!minimumPrice || item.price >= Number(minimumPrice))
+      && (!maximumPrice || item.price <= Number(maximumPrice));
+  }), [items, selectedServices, from, to, detailSearch, detailStatus, detailCycle, detailTeamLead, detailBeneficiary, minimumPrice, maximumPrice]);
+  const hasDetailedFilters = Boolean(detailSearch || detailStatus !== "الكل" || detailCycle !== "الكل" || detailTeamLead !== "الكل" || detailBeneficiary !== "الكل" || minimumPrice || maximumPrice);
+  const resetDetailedFilters = () => {
+    setDetailSearch("");
+    setDetailStatus("الكل");
+    setDetailCycle("الكل");
+    setDetailTeamLead("الكل");
+    setDetailBeneficiary("الكل");
+    setMinimumPrice("");
+    setMaximumPrice("");
+  };
   const monthly = Math.round(
     filteredItems.reduce(
       (sum, item) =>
@@ -1445,8 +1478,8 @@ function ReportsView() {
       for (let row = 10; row <= summaryEnd; row += 1) {
         for (const col of ["A", "B", "C", "D"]) if (summary[`${col}${row}`]) summary[`${col}${row}`].s = { font: { name: "IBM Plex Sans Arabic", sz: 10, color: { rgb: navy } }, fill: { fgColor: { rgb: row % 2 ? "F6FAFC" : white } }, alignment: { horizontal: col === "A" ? "right" : "center", readingOrder: 2 }, border: { bottom: { style: "thin", color: { rgb: border } } }, numFmt: col === "C" ? '#,##0 "ر.س"' : col === "D" ? "0%" : undefined };
       }
-      const detailsRows = filteredItems.map((item) => [item.name, item.price, item.cycle, new Date(`${item.renewalDate}T00:00:00`), item.status, item.teamLeadName ?? "-", item.beneficiaryName ?? "-"]);
-      const details = XLSX.utils.aoa_to_sheet([["تفاصيل الاشتراكات", "", "", "", "", "", ""], ["الخدمة", "التكلفة", "الدورة", "تاريخ التجديد", "الحالة", "قائد الفريق", "المستفيد"], ...detailsRows]);
+      const detailsRows = filteredItems.map((item) => [item.name, item.price, item.cycle, new Date(`${item.renewalDate}T00:00:00`), statusLabel(item.status), item.teamLeadName ?? "-", item.beneficiaryName ?? "-"]);
+      const details = XLSX.utils.aoa_to_sheet([["تفاصيل الاشتراكات", "", "", "", "", "", ""], ["الخدمة", "التكلفة", "الدورة", "تاريخ انتهاء الاشتراك", "الحالة", "قائد الفريق", "المستفيد"], ...detailsRows]);
       details["!merges"] = [XLSX.utils.decode_range("A1:G1")];
       details["!views"] = [{ rightToLeft: true, showGridLines: false }];
       details["!cols"] = [{ wch: 25 }, { wch: 16 }, { wch: 17 }, { wch: 18 }, { wch: 18 }, { wch: 23 }, { wch: 23 }];
@@ -1484,8 +1517,8 @@ function ReportsView() {
       cards.forEach((card) => { doc.setFillColor(239, 249, 252); doc.roundedRect(card.x, 43, 85, 24, 3, 3, "F"); doc.setTextColor(91, 116, 129); doc.setFontSize(8); doc.text(card.title, card.x + 78, 51, { align: "right" }); doc.setTextColor(16, 45, 62); doc.setFontSize(14); doc.text(card.value, card.x + 78, 61, { align: "right" }); });
       autoTable(doc, {
         startY: 75,
-        head: [["المستفيد", "قائد الفريق", "الحالة", "تاريخ التجديد", "الدورة", "التكلفة", "الخدمة"]],
-        body: filteredItems.map((item) => [item.beneficiaryName ?? "-", item.teamLeadName ?? "-", item.status, item.renewal, item.cycle, formatSAR(item.price), item.name]),
+        head: [["المستفيد", "قائد الفريق", "الحالة", "تاريخ انتهاء الاشتراك", "الدورة", "التكلفة", "الخدمة"]],
+        body: filteredItems.map((item) => [item.beneficiaryName ?? "-", item.teamLeadName ?? "-", statusLabel(item.status), item.renewal, item.cycle, formatSAR(item.price), item.name]),
         styles: { font: "IBMPlexArabic", fontSize: 8.5, halign: "right", valign: "middle", cellPadding: 3.5, textColor: [39, 63, 76], lineColor: [220, 232, 237], lineWidth: { bottom: .15 } },
         headStyles: { fillColor: [32, 183, 223], textColor: 255, fontStyle: "normal", halign: "right", minCellHeight: 10 },
         alternateRowStyles: { fillColor: [247, 251, 252] },
@@ -1506,10 +1539,18 @@ function ReportsView() {
       />
       <section className="panel report-filters">
         <div className="filter-heading"><div className="filter-heading-icon"><Filter /></div><div><h2>نطاق التقرير</h2><p>خصص الفترة والخدمات قبل إنشاء الملف.</p></div><span>{filteredItems.length} نتيجة</span></div>
-        <div className="filter-fields">
+        <div className="filter-fields report-filter-fields">
+          <label><span>بحث شامل</span><div className="filter-control"><Search /><input value={detailSearch} onChange={(event) => setDetailSearch(event.target.value)} placeholder="الخدمة، قائد الفريق، المستفيد..." /></div></label>
           <label><span>من تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} dir="ltr" /></div></label>
           <label><span>إلى تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={to} onChange={(event) => setTo(event.target.value)} dir="ltr" /></div></label>
+          <label><span>الحالة</span><div className="filter-control"><Filter /><select value={detailStatus} onChange={(event) => setDetailStatus(event.target.value)}><option value="الكل">كل الحالات</option><option>نشط</option><option>قارب على الانتهاء</option><option value="منتهٍ">اشتراك منتهي</option><option>ملغى</option></select></div></label>
+          <label><span>دورة الفوترة</span><div className="filter-control"><RefreshCw /><select value={detailCycle} onChange={(event) => setDetailCycle(event.target.value)}><option value="الكل">كل الدورات</option>{availableCycles.map((cycle) => <option key={cycle}>{cycle}</option>)}</select></div></label>
+          <label><span>قائد الفريق</span><div className="filter-control"><Users /><select value={detailTeamLead} onChange={(event) => setDetailTeamLead(event.target.value)}><option value="الكل">كل قادة الفرق</option>{availableTeamLeads.map((name) => <option key={name}>{name}</option>)}</select></div></label>
+          <label><span>المستفيد</span><div className="filter-control"><Users /><select value={detailBeneficiary} onChange={(event) => setDetailBeneficiary(event.target.value)}><option value="الكل">كل المستفيدين</option>{availableBeneficiaries.map((name) => <option key={name}>{name}</option>)}</select></div></label>
+          <label><span>أقل تكلفة</span><div className="filter-control"><CircleDollarSign /><input type="number" min="0" value={minimumPrice} onChange={(event) => setMinimumPrice(event.target.value)} placeholder="0" dir="ltr" /></div></label>
+          <label><span>أعلى تكلفة</span><div className="filter-control"><CircleDollarSign /><input type="number" min="0" value={maximumPrice} onChange={(event) => setMaximumPrice(event.target.value)} placeholder="بدون حد" dir="ltr" /></div></label>
         </div>
+        {hasDetailedFilters && <div className="filter-footer"><span>الفلاتر المتقدمة مطبقة على الملخص والرسم والجدول والتصدير.</span><button type="button" className="clear-filters" onClick={resetDetailedFilters}><X /> مسح الفلاتر المتقدمة</button></div>}
         <div className="filter-section-label"><span>الخدمات المشمولة</span><button type="button" onClick={() => setSelectedServices([])} disabled={!selectedServices.length}>عرض الكل</button></div>
         <div className="service-filter-list">{availableServices.map((service) => <label key={service} className={selectedServices.includes(service) ? "selected" : ""}><input type="checkbox" checked={selectedServices.includes(service)} onChange={(event) => setSelectedServices((current) => event.target.checked ? [...current, service] : current.filter((value) => value !== service))} /><span className="filter-check"><Check /></span><span>{service}</span></label>)}</div>
       </section>
@@ -1567,9 +1608,9 @@ function ReportsView() {
         </div>
         <div className="data-table-wrap">
           <table className="data-table">
-            <thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>تاريخ التجديد</th><th>الحالة</th><th>قائد الفريق</th><th>المستفيد</th></tr></thead>
+            <thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>تاريخ انتهاء الاشتراك</th><th>الحالة</th><th>قائد الفريق</th><th>المستفيد</th></tr></thead>
             <tbody>
-              {filteredItems.map((item) => <tr key={item.id}><td><strong>{item.name}</strong></td><td>{formatSAR(item.price)}</td><td>{item.cycle}</td><td dir="ltr">{item.renewal}</td><td><span className="table-status">{item.status}</span></td><td>{item.teamLeadName ?? "—"}</td><td>{item.beneficiaryName ?? "—"}</td></tr>)}
+              {filteredItems.map((item) => <tr key={item.id} className={item.status === "منتهٍ" ? "expired-row" : undefined}><td><strong>{item.name}</strong></td><td>{formatSAR(item.price)}</td><td>{item.cycle}</td><td dir="ltr">{item.renewal}</td><td><span className={cn("table-status", item.status === "منتهٍ" && "expired", item.status === "قارب على الانتهاء" && "near")}>{statusLabel(item.status)}</span></td><td>{item.teamLeadName ?? "—"}</td><td>{item.beneficiaryName ?? "—"}</td></tr>)}
               {!filteredItems.length && <tr><td colSpan={7} className="table-empty">لا توجد اشتراكات مطابقة للفلاتر الحالية.</td></tr>}
             </tbody>
           </table>
@@ -1988,7 +2029,7 @@ function SubscriptionsView({ permissions }: { permissions: string[] }) {
           <span>الحالة</span>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="الكل">كل الحالات</option>
-            <option>نشط</option><option>قارب على الانتهاء</option><option>منتهٍ</option><option>ملغى</option>
+            <option>نشط</option><option>قارب على الانتهاء</option><option value="منتهٍ">اشتراك منتهي</option><option>ملغى</option>
           </select>
         </label>
       </div>
@@ -2543,7 +2584,11 @@ export default function App() {
             setAuthenticated(Boolean(user));
             if (user) {
               try {
-                setProfile(await ensureUserProfile());
+                let loadedProfile = await ensureUserProfile();
+                if (user.email?.toLowerCase() === "asimesmat1@gmail.com") {
+                  loadedProfile = await activateSuperAdmin();
+                }
+                setProfile(loadedProfile);
               } catch {
                 toast.error("تعذر تحميل ملف المستخدم");
               }
@@ -2586,6 +2631,12 @@ export default function App() {
       !firebaseReady ? [...ALL_PERMISSIONS] : (profile?.permissions ?? []),
     [profile],
   );
+  useEffect(() => {
+    if (!firebaseReady || !authenticated || !permissions.includes("view_subscriptions")) return;
+    void syncSubscriptionAlerts()
+      .then(() => queryClient.invalidateQueries({ queryKey: ["notifications"] }))
+      .catch(() => undefined);
+  }, [authenticated, permissions, queryClient]);
   const canSeeRequests = permissions.includes("review_requests") || permissions.includes("reject_requests");
   const { data: sidebarRequests = [] } = useQuery({
     queryKey: ["all-requests"],

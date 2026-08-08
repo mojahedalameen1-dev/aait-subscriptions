@@ -3,16 +3,6 @@ import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore, Timestamp } from "firebase-admin/firestore";
 
-type Permission =
-  | "manage_subscriptions"
-  | "review_requests"
-  | "reject_requests"
-  | "store_credentials"
-  | "reveal_credentials"
-  | "manage_users_roles"
-  | "delete_subscriptions";
-
-type Profile = { permissions?: Permission[]; name?: string };
 const SUPER_ADMIN_EMAIL = "asimesmat1@gmail.com";
 const ALL_SYSTEM_PERMISSIONS = [
   "view_subscriptions",
@@ -25,7 +15,9 @@ const ALL_SYSTEM_PERMISSIONS = [
   "store_credentials",
   "reveal_credentials",
   "view_audit_log",
-];
+] as const;
+type Permission = (typeof ALL_SYSTEM_PERMISSIONS)[number];
+type Profile = { permissions?: readonly Permission[]; name?: string };
 type VercelRequest = {
   method?: string;
   headers: { authorization?: string; origin?: string };
@@ -106,10 +98,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const app = adminApp();
     const authUser = await getAuth(app).verifyIdToken(token);
     const db = getFirestore(app);
-    const profileDoc = await db.doc(`users/${authUser.uid}`).get();
-    const profile = (profileDoc.data() ?? {}) as Profile;
+    const profileRef = db.doc(`users/${authUser.uid}`);
+    const profileDoc = await profileRef.get();
+    const isSuperAdmin = authUser.email?.toLowerCase() === SUPER_ADMIN_EMAIL;
+    const storedProfile = (profileDoc.data() ?? {}) as Profile;
+    const profile: Profile = isSuperAdmin
+      ? { ...storedProfile, permissions: ALL_SYSTEM_PERMISSIONS }
+      : storedProfile;
     const action = String(req.body?.action ?? "");
     const payload = req.body?.payload ?? {};
+
+    const needsSuperAdminSync = isSuperAdmin && (
+      profileDoc.data()?.is_owner !== true
+      || !ALL_SYSTEM_PERMISSIONS.every((permission) => profileDoc.data()?.permissions?.includes(permission))
+    );
+    if (needsSuperAdminSync) {
+      await profileRef.set({
+        uid: authUser.uid,
+        email: authUser.email ?? SUPER_ADMIN_EMAIL,
+        name: profileDoc.data()?.name ?? authUser.name ?? "مدير النظام",
+        photo_url: profileDoc.data()?.photo_url ?? authUser.picture ?? "",
+        is_owner: true,
+        roles: ["system-owner"],
+        permissions: ALL_SYSTEM_PERMISSIONS,
+        updated_at: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    if (action === "activate_super_admin") {
+      if (!isSuperAdmin) throw new Error("هذا الحساب غير مخوّل كمدير نظام");
+      const refreshed = await profileRef.get();
+      return res.status(200).json({
+        uid: authUser.uid,
+        name: refreshed.data()?.name ?? authUser.name ?? "مدير النظام",
+        email: authUser.email ?? SUPER_ADMIN_EMAIL,
+        photo_url: refreshed.data()?.photo_url ?? authUser.picture ?? "",
+        roles: ["system-owner"],
+        permissions: ALL_SYSTEM_PERMISSIONS,
+        is_owner: true,
+      });
+    }
+
+    if (action === "sync_subscription_alerts") {
+      allow(profile, "view_subscriptions");
+      const now = new Date();
+      const threshold = new Date(now.getTime() + (3 * 86400000));
+      const [expiring, administrators] = await Promise.all([
+        db.collection("subscriptions").where("renewal_date", "<=", Timestamp.fromDate(threshold)).get(),
+        db.collection("users").where("permissions", "array-contains", "view_subscriptions").get(),
+      ]);
+      const alerts: Array<{ ref: FirebaseFirestore.DocumentReference; data: Record<string, unknown> }> = [];
+      for (const subscriptionDoc of expiring.docs) {
+        const data = subscriptionDoc.data();
+        if (data.status === "ملغى" || !data.renewal_date?.toDate) continue;
+        const renewalDate = data.renewal_date.toDate() as Date;
+        const days = Math.ceil((renewalDate.getTime() - now.getTime()) / 86400000);
+        const kind = days < 0 ? "expired" : "near";
+        const dateKey = renewalDate.toISOString().slice(0, 10);
+        for (const administrator of administrators.docs) {
+          const notificationRef = db.doc(`notifications/subscription-${kind}-${subscriptionDoc.id}-${dateKey}-${administrator.id}`);
+          alerts.push({ ref: notificationRef, data: {
+            user_id: administrator.id,
+            title: kind === "expired" ? "اشتراك منتهي" : "اشتراك قارب على الانتهاء",
+            body: kind === "expired"
+              ? `انتهى اشتراك ${String(data.name ?? "الخدمة")} ويحتاج إلى إجراء إداري.`
+              : `سينتهي اشتراك ${String(data.name ?? "الخدمة")} خلال ${Math.max(days, 0)} أيام.`,
+            read: false,
+            priority: "high",
+            subscription_id: subscriptionDoc.id,
+            alert_kind: kind,
+            created_at: FieldValue.serverTimestamp(),
+          } });
+        }
+      }
+      let created = 0;
+      for (let offset = 0; offset < alerts.length; offset += 400) {
+        const chunk = alerts.slice(offset, offset + 400);
+        const existing = await db.getAll(...chunk.map((alert) => alert.ref));
+        const batch = db.batch();
+        existing.forEach((document, index) => {
+          if (!document.exists) {
+            batch.create(chunk[index].ref, chunk[index].data);
+            created += 1;
+          }
+        });
+        if (existing.some((document) => !document.exists)) await batch.commit();
+      }
+      return res.status(200).json({ ok: true, created });
+    }
 
     if (action === "delete_user") {
       if (authUser.email?.toLowerCase() !== SUPER_ADMIN_EMAIL)
@@ -719,7 +795,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === "grant_system_owner") {
       const config = await db.doc("system/config").get();
-      if (config.data()?.owner_uid !== authUser.uid)
+      if (config.data()?.owner_uid !== authUser.uid && !isSuperAdmin)
         throw new Error("مالك النظام الأساسي فقط يمكنه منح هذه الصلاحية");
       const uid = String(payload.uid ?? "");
       if (!uid || uid === authUser.uid) throw new Error("اختر مستخدمًا آخر");

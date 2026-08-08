@@ -71,6 +71,8 @@ export async function deleteSubscription(subscriptionId:string) { return secureA
 
 export async function markNotificationRead(id:string) { const { db } = requireContext(); return updateDoc(doc(db,'notifications',id),{read:true}) }
 export async function markAllNotificationsRead() { const { db, user } = requireContext(); const snapshot = await getDocs(query(collection(db,'notifications'),where('user_id','==',user.uid),where('read','==',false))); await Promise.all(snapshot.docs.map((item) => updateDoc(item.ref,{read:true}))) }
+export async function syncSubscriptionAlerts() { return secureAction<{ok:true;created:number}>('sync_subscription_alerts',{}) }
+export async function activateSuperAdmin() { return secureAction<UserProfile>('activate_super_admin',{}) }
 
 export async function secureAction<T = { ok: true }>(action:string,payload:Record<string,unknown>):Promise<T> {
   const user = auth?.currentUser

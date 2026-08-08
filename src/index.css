@@ -567,6 +567,14 @@ main {
   padding: 16px;
   transition: 0.2s;
 }
+.subscription-card.subscription-expired {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  box-shadow: inset 4px 0 0 var(--danger), 0 10px 26px color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.subscription-card.subscription-expired .subscription-meta > div:last-child strong,
+.subscription-card.subscription-expired .subscription-meta > div:last-child small {
+  color: var(--danger);
+}
 .subscription-top {
   justify-content: flex-start;
 }
@@ -1338,6 +1346,9 @@ footer {
 .data-table td strong { color: inherit; font-size: 13px; }
 .data-table tbody tr { transition: background-color 150ms ease; }
 .table-status { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: color-mix(in srgb, var(--success) 11%, var(--surface)); color: var(--success); font-weight: 600; }
+.table-status.near { background: color-mix(in srgb, #e59a16 13%, var(--surface)); color: #c67c00; }
+.table-status.expired { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: var(--danger); font-weight: 800; }
+.data-table tbody tr.expired-row { background: color-mix(in srgb, var(--danger) 5%, var(--surface)); }
 .table-empty { padding: 30px !important; text-align: center; }
 
 @media (hover: hover) and (pointer: fine) {
@@ -2334,6 +2345,7 @@ footer {
 .filter-heading p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .filter-heading > span { margin-inline-start: auto; padding: 6px 10px; border-radius: 999px; background: var(--surface); color: var(--primary); font-size: 10px; font-weight: 700; white-space: nowrap; box-shadow: 0 2px 8px var(--shadow); }
 .filter-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 18px 20px 8px; }
+.report-filter-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .audit-filter-fields { grid-template-columns: 1.35fr 1fr 1fr 1fr; }
 .filter-fields label { display: grid; gap: 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
 .filter-control { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 0 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease; }
