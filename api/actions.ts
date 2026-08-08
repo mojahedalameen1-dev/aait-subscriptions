@@ -77,6 +77,26 @@ function allow(profile: Profile, permission: Permission) {
     throw new Error("ليس لديك صلاحية لهذا الإجراء");
 }
 
+function normalizeServiceName(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const aliases: Record<string, string> = {
+    "(codex) chatgpt": "ChatGPT (Codex)",
+    "chatgpt (codex)": "ChatGPT (Codex)",
+    "readdy ai": "Readdy AI",
+  };
+  const direct = aliases[raw.toLowerCase()];
+  if (direct) return direct;
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const host = new URL(raw).hostname.replace(/^www\./i, "").toLowerCase();
+      const knownHosts: Record<string, string> = { "readdy.ai": "Readdy AI" };
+      return knownHosts[host] ?? host;
+    } catch { return raw; }
+  }
+  return raw;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin ?? "";
   const allowedOrigins = [
@@ -213,7 +233,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === "create_request") {
       const type = payload.type === "renewal" ? "renewal" : "new";
-      const serviceName = String(payload.serviceName ?? "").trim();
+      const serviceName = normalizeServiceName(payload.serviceName);
       const purpose = String(payload.purpose ?? "").trim();
       if (!serviceName || !purpose)
         throw new Error("اسم الخدمة والغاية مطلوبان");
@@ -397,7 +417,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
         const subscription = {
-          name: data.service_name,
+          name: normalizeServiceName(data.service_name),
           category: String(payload.category ?? "خدمات أخرى"),
           price: approvedCost,
           currency: "SAR",
@@ -465,7 +485,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === "create_subscription") {
       allow(profile, "manage_subscriptions");
-      const name = String(payload.name ?? "").trim();
+      const name = normalizeServiceName(payload.name);
       const price = Number(payload.price ?? 0);
       const renewal = new Date(String(payload.renewalDate ?? ""));
       if (!name) throw new Error("اسم الخدمة مطلوب");
@@ -531,6 +551,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         "assigned_to",
       ] as const)
         if (field in changes) allowedChanges[field] = changes[field];
+      if ("name" in allowedChanges) allowedChanges.name = normalizeServiceName(allowedChanges.name);
       if ("renewal_date" in changes)
         allowedChanges.renewal_date = Timestamp.fromDate(
           new Date(String(changes.renewal_date)),
