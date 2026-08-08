@@ -1,15 +1,17 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Activity,
+  ArrowUpDown,
   Bell,
   CalendarDays,
   CheckCheck,
   Check,
   ChevronLeft,
+  ChevronDown,
   CircleDollarSign,
   Clock3,
   Crown,
@@ -20,6 +22,7 @@ import {
   FileSpreadsheet,
   FileText,
   Filter,
+  Download,
   LockKeyhole,
   LogOut,
   Menu,
@@ -28,9 +31,11 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Sun,
   Trash2,
+  TrendingUp,
   Volume2,
   VolumeX,
   Users,
@@ -167,6 +172,9 @@ const nav: { id: View; label: string; icon: typeof Gauge }[] = [
 ];
 const formatSAR = (value: number) =>
   new Intl.NumberFormat("en-US").format(value) + " ر.س";
+const billingCycleMonths = (cycle: string) => cycle === "شهري" ? 1 : cycle === "ربع سنوي" ? 3 : cycle === "نصف سنوي" ? 6 : 12;
+const monthlyEquivalent = (item: Subscription) => item.price / billingCycleMonths(item.cycle);
+const annualEquivalent = (item: Subscription) => item.cycle === "مرة واحدة" ? item.price : monthlyEquivalent(item) * 12;
 const colors = ["#2ac0eb", "#7357ff", "#10a37f", "#d97757", "#d50c2d"];
 const daysUntil = (date?: Date) =>
   date ? Math.ceil((date.getTime() - Date.now()) / 86400000) : 0;
@@ -272,7 +280,7 @@ function Metric({
 }: {
   icon: typeof Gauge;
   title: string;
-  value: string;
+  value: ReactNode;
   trend: string;
   tone?: string;
 }) {
@@ -288,6 +296,36 @@ function Metric({
       </div>
     </article>
   );
+}
+
+function AnimatedNumber({ value, formatter = (number) => String(number) }: { value: number; formatter?: (value: number) => string }) {
+  const [displayed, setDisplayed] = useState(value);
+  const previous = useRef(value);
+  useEffect(() => {
+    const startValue = previous.current;
+    previous.current = value;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDisplayed(value);
+      return undefined;
+    }
+    const startedAt = performance.now();
+    let frame = 0;
+    const animate = (now: number) => {
+      const progress = Math.min((now - startedAt) / 360, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayed(Math.round(startValue + ((value - startValue) * eased)));
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+  return formatter(displayed);
+}
+
+type ReportSortKey = "name" | "price" | "cycle" | "renewal" | "status" | "teamLead" | "beneficiary";
+function ReportSortButton({ label, field, activeField, direction, onSort }: { label: string; field: ReportSortKey; activeField: ReportSortKey; direction: "asc" | "desc"; onSort: (field: ReportSortKey) => void }) {
+  const active = field === activeField;
+  return <button type="button" className={cn("table-sort", active && "active")} onClick={() => onSort(field)} aria-label={`ترتيب حسب ${label}`} aria-pressed={active}>{label}<ArrowUpDown className={cn(active && direction === "desc" && "descending")} /></button>;
 }
 
 function ServiceLogo({
@@ -1387,6 +1425,12 @@ function ReportsView() {
   const [minimumPrice, setMinimumPrice] = useState("");
   const [maximumPrice, setMaximumPrice] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [sortField, setSortField] = useState<ReportSortKey>("renewal");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [selectedDetail, setSelectedDetail] = useState<Subscription | null>(null);
   const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
   const { data: items = subscriptions } = useQuery({
     queryKey: ["all-subscriptions"],
@@ -1413,26 +1457,33 @@ function ReportsView() {
       && (!minimumPrice || item.price >= Number(minimumPrice))
       && (!maximumPrice || item.price <= Number(maximumPrice));
   }), [items, selectedServices, from, to, detailSearch, detailStatus, detailCycle, detailTeamLead, detailBeneficiary, minimumPrice, maximumPrice]);
-  const hasDetailedFilters = Boolean(detailSearch || detailStatus !== "الكل" || detailCycle !== "الكل" || detailTeamLead !== "الكل" || detailBeneficiary !== "الكل" || minimumPrice || maximumPrice);
+  const hasDetailedFilters = Boolean(detailCycle !== "الكل" || detailTeamLead !== "الكل" || detailBeneficiary !== "الكل" || minimumPrice || maximumPrice);
+  const hasAnyFilters = Boolean(detailSearch || from || to || detailStatus !== "الكل" || hasDetailedFilters || selectedServices.length);
   const resetDetailedFilters = () => {
-    setDetailSearch("");
-    setDetailStatus("الكل");
     setDetailCycle("الكل");
     setDetailTeamLead("الكل");
     setDetailBeneficiary("الكل");
     setMinimumPrice("");
     setMaximumPrice("");
   };
-  const monthly = Math.round(
-    filteredItems.reduce(
-      (sum, item) =>
-        sum +
-        item.price /
-          (item.cycle === "سنوي" ? 12 : item.cycle === "ربع سنوي" ? 3 : 1),
-      0,
-    ),
-  );
-  const annual = monthly * 12;
+  const clearAllFilters = () => {
+    setFrom(""); setTo(""); setDetailSearch(""); setDetailStatus("الكل");
+    resetDetailedFilters(); setSelectedServices([]); setPage(1);
+  };
+  const applyPeriod = (period: "month" | "quarter" | "year" | "urgent") => {
+    const now = new Date();
+    const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    if (period === "urgent") {
+      const end = new Date(now); end.setDate(end.getDate() + 3);
+      setFrom(localDate(now)); setTo(localDate(end)); setDetailStatus("قارب على الانتهاء");
+    } else {
+      const start = new Date(now.getFullYear(), period === "year" ? 0 : period === "quarter" ? now.getMonth() - 2 : now.getMonth(), 1);
+      setFrom(localDate(start)); setTo(localDate(now)); setDetailStatus("الكل");
+    }
+    setPage(1);
+  };
+  const monthly = Math.round(filteredItems.reduce((sum, item) => sum + monthlyEquivalent(item), 0));
+  const annual = Math.round(filteredItems.reduce((sum, item) => sum + annualEquivalent(item), 0));
   const average = filteredItems.length ? Math.round(monthly / filteredItems.length) : 0;
   const activeCount = filteredItems.filter((x) => x.status === "نشط").length;
   const nearCount = filteredItems.filter(
@@ -1440,7 +1491,45 @@ function ReportsView() {
   ).length;
   const expiredCount = filteredItems.filter((x) => x.status === "منتهٍ").length;
   const canceledCount = filteredItems.filter((x) => x.status === "ملغى").length;
-  const reportData = monthlySeries(monthly);
+  const sortedItems = useMemo(() => [...filteredItems].sort((left, right) => {
+    const values: Record<ReportSortKey, [string | number, string | number]> = {
+      name: [left.name, right.name], price: [left.price, right.price], cycle: [left.cycle, right.cycle],
+      renewal: [left.renewalDate, right.renewalDate], status: [left.status, right.status],
+      teamLead: [left.teamLeadName ?? "", right.teamLeadName ?? ""], beneficiary: [left.beneficiaryName ?? "", right.beneficiaryName ?? ""],
+    };
+    const [a, b] = values[sortField];
+    const result = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "ar");
+    return sortDirection === "asc" ? result : -result;
+  }), [filteredItems, sortField, sortDirection]);
+  const pages = Math.max(1, Math.ceil(sortedItems.length / pageSize));
+  const safePage = Math.min(page, pages);
+  const visibleItems = sortedItems.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const sortReport = (field: ReportSortKey) => {
+    if (field === sortField) setSortDirection((current) => current === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDirection("asc"); }
+    setPage(1);
+  };
+  const costByService = useMemo(() => {
+    const totals = new Map<string, number>();
+    filteredItems.forEach((item) => totals.set(item.name, (totals.get(item.name) ?? 0) + monthlyEquivalent(item)));
+    return [...totals].map(([name, value]) => ({ name, value: Math.round(value) })).sort((a, b) => b.value - a.value).slice(0, 6);
+  }, [filteredItems]);
+  const renewalForecast = useMemo(() => {
+    const now = new Date();
+    return Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() + index, 1);
+      const year = date.getFullYear(), month = date.getMonth();
+      const value = filteredItems.reduce((sum, item) => {
+        if (!item.renewalDate) return sum;
+        const renewal = new Date(`${item.renewalDate}T00:00:00`);
+        return renewal.getFullYear() === year && renewal.getMonth() === month ? sum + item.price : sum;
+      }, 0);
+      return { month: new Intl.DateTimeFormat("ar-SA-u-nu-latn", { month: "short" }).format(date), value };
+    });
+  }, [filteredItems]);
+  const highestCost = filteredItems.reduce<Subscription | null>((highest, item) => !highest || item.price > highest.price ? item : highest, null);
+  const nearestExpiry = filteredItems.filter((item) => item.days >= 0 && item.status !== "ملغى").sort((a, b) => a.days - b.days)[0];
+  const renewalThisMonth = renewalForecast[0]?.value ?? 0;
   const reportPeriod = `${from || "بداية السجل"} - ${to || "اليوم"}`;
   const exportExcel = () => {
     if (!filteredItems.length) return toast.error("لا توجد بيانات مطابقة لتصديرها");
@@ -1459,7 +1548,7 @@ function ReportsView() {
         ["الخدمة", "عدد الاشتراكات", "الإنفاق الشهري", "الحصة من الإنفاق", "", "", ""],
         ...availableServices.filter((service) => !selectedServices.length || selectedServices.includes(service)).map((service) => {
           const serviceItems = filteredItems.filter((item) => item.name === service);
-          const serviceMonthly = Math.round(serviceItems.reduce((sum, item) => sum + item.price / (item.cycle === "سنوي" ? 12 : item.cycle === "ربع سنوي" ? 3 : 1), 0));
+          const serviceMonthly = Math.round(serviceItems.reduce((sum, item) => sum + monthlyEquivalent(item), 0));
           return [service, serviceItems.length, serviceMonthly, monthly ? serviceMonthly / monthly : 0, "", "", ""];
         }),
       ]);
@@ -1534,88 +1623,114 @@ function ReportsView() {
     <>
       <PageTitle
         title="التقارير المالية"
-        subtitle="رؤية واضحة لتكاليف الخدمات والاتجاهات"
-        action={<div className="report-export-actions"><button className="btn secondary" onClick={exportExcel} disabled={Boolean(exporting)}><FileSpreadsheet /> {exporting === "excel" ? "جارٍ تجهيز Excel..." : "تنزيل Excel"}</button><button className="btn primary" onClick={exportPdf} disabled={Boolean(exporting)}><FileText /> {exporting === "pdf" ? "جارٍ تجهيز PDF..." : "تنزيل PDF"}</button></div>}
+        subtitle="استكشف التكاليف والتجديدات واتخذ القرار من بيانات واضحة"
+        action={
+          <DropdownMenu.Root dir="rtl">
+            <DropdownMenu.Trigger asChild><button className="btn primary report-export-trigger" disabled={Boolean(exporting)}><Download /> {exporting ? "جارٍ تجهيز التقرير..." : "تصدير التقرير"}<ChevronDown /></button></DropdownMenu.Trigger>
+            <DropdownMenu.Portal><DropdownMenu.Content className="export-menu" align="end" sideOffset={8}>
+              <div className="export-menu-head"><strong>تصدير {filteredItems.length} اشتراك</strong><small>{reportPeriod}</small></div>
+              <DropdownMenu.Item onSelect={exportExcel}><FileSpreadsheet /><span><strong>ملف Excel</strong><small>جداول منسقة وقابلة للتحليل</small></span></DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={() => void exportPdf()}><FileText /><span><strong>ملف PDF</strong><small>تقرير عربي جاهز للمشاركة</small></span></DropdownMenu.Item>
+            </DropdownMenu.Content></DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        }
       />
       <section className="panel report-filters">
-        <div className="filter-heading"><div className="filter-heading-icon"><Filter /></div><div><h2>نطاق التقرير</h2><p>خصص الفترة والخدمات قبل إنشاء الملف.</p></div><span>{filteredItems.length} نتيجة</span></div>
-        <div className="filter-fields report-filter-fields">
-          <label><span>بحث شامل</span><div className="filter-control"><Search /><input value={detailSearch} onChange={(event) => setDetailSearch(event.target.value)} placeholder="الخدمة، قائد الفريق، المستفيد..." /></div></label>
-          <label><span>من تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} dir="ltr" /></div></label>
-          <label><span>إلى تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={to} onChange={(event) => setTo(event.target.value)} dir="ltr" /></div></label>
-          <label><span>الحالة</span><div className="filter-control"><Filter /><select value={detailStatus} onChange={(event) => setDetailStatus(event.target.value)}><option value="الكل">كل الحالات</option><option>نشط</option><option>قارب على الانتهاء</option><option value="منتهٍ">اشتراك منتهي</option><option>ملغى</option></select></div></label>
-          <label><span>دورة الفوترة</span><div className="filter-control"><RefreshCw /><select value={detailCycle} onChange={(event) => setDetailCycle(event.target.value)}><option value="الكل">كل الدورات</option>{availableCycles.map((cycle) => <option key={cycle}>{cycle}</option>)}</select></div></label>
-          <label><span>قائد الفريق</span><div className="filter-control"><Users /><select value={detailTeamLead} onChange={(event) => setDetailTeamLead(event.target.value)}><option value="الكل">كل قادة الفرق</option>{availableTeamLeads.map((name) => <option key={name}>{name}</option>)}</select></div></label>
-          <label><span>المستفيد</span><div className="filter-control"><Users /><select value={detailBeneficiary} onChange={(event) => setDetailBeneficiary(event.target.value)}><option value="الكل">كل المستفيدين</option>{availableBeneficiaries.map((name) => <option key={name}>{name}</option>)}</select></div></label>
-          <label><span>أقل تكلفة</span><div className="filter-control"><CircleDollarSign /><input type="number" min="0" value={minimumPrice} onChange={(event) => setMinimumPrice(event.target.value)} placeholder="0" dir="ltr" /></div></label>
-          <label><span>أعلى تكلفة</span><div className="filter-control"><CircleDollarSign /><input type="number" min="0" value={maximumPrice} onChange={(event) => setMaximumPrice(event.target.value)} placeholder="بدون حد" dir="ltr" /></div></label>
+        <div className="filter-heading"><div className="filter-heading-icon"><Filter /></div><div><h2>نطاق التقرير</h2><p>اختر نطاقًا سريعًا أو خصص البيانات بدقة.</p></div><span><AnimatedNumber value={filteredItems.length} /> نتيجة</span></div>
+        <div className="report-presets" aria-label="فترات جاهزة">
+          <button type="button" onClick={() => applyPeriod("month")}><CalendarDays /> هذا الشهر</button>
+          <button type="button" onClick={() => applyPeriod("quarter")}><TrendingUp /> آخر 3 أشهر</button>
+          <button type="button" onClick={() => applyPeriod("year")}><Activity /> هذا العام</button>
+          <button type="button" className="urgent" onClick={() => applyPeriod("urgent")}><Clock3 /> ينتهي خلال 3 أيام</button>
         </div>
-        {hasDetailedFilters && <div className="filter-footer"><span>الفلاتر المتقدمة مطبقة على الملخص والرسم والجدول والتصدير.</span><button type="button" className="clear-filters" onClick={resetDetailedFilters}><X /> مسح الفلاتر المتقدمة</button></div>}
-        <div className="filter-section-label"><span>الخدمات المشمولة</span><button type="button" onClick={() => setSelectedServices([])} disabled={!selectedServices.length}>عرض الكل</button></div>
-        <div className="service-filter-list">{availableServices.map((service) => <label key={service} className={selectedServices.includes(service) ? "selected" : ""}><input type="checkbox" checked={selectedServices.includes(service)} onChange={(event) => setSelectedServices((current) => event.target.checked ? [...current, service] : current.filter((value) => value !== service))} /><span className="filter-check"><Check /></span><span>{service}</span></label>)}</div>
+        <div className="filter-fields report-filter-fields basic">
+          <label><span>بحث شامل</span><div className="filter-control"><Search /><input value={detailSearch} onChange={(event) => { setDetailSearch(event.target.value); setPage(1); }} placeholder="الخدمة، قائد الفريق، المستفيد..." /></div></label>
+          <label><span>من تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} dir="ltr" /></div></label>
+          <label><span>إلى تاريخ</span><div className="filter-control"><CalendarDays /><input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} dir="ltr" /></div></label>
+          <label><span>الحالة</span><div className="filter-control"><Filter /><select value={detailStatus} onChange={(event) => { setDetailStatus(event.target.value); setPage(1); }}><option value="الكل">كل الحالات</option><option>نشط</option><option>قارب على الانتهاء</option><option value="منتهٍ">اشتراك منتهي</option><option>ملغى</option></select></div></label>
+        </div>
+        <button className={cn("advanced-filter-toggle", advancedOpen && "active")} type="button" onClick={() => setAdvancedOpen((current) => !current)} aria-expanded={advancedOpen}><SlidersHorizontal /> فلاتر متقدمة {hasDetailedFilters ? <b>مفعّلة</b> : null}<ChevronDown /></button>
+        {advancedOpen ? <div className="advanced-filter-panel">
+          <div className="filter-fields report-filter-fields advanced">
+            <label><span>دورة الفوترة</span><div className="filter-control"><RefreshCw /><select value={detailCycle} onChange={(event) => { setDetailCycle(event.target.value); setPage(1); }}><option value="الكل">كل الدورات</option>{availableCycles.map((cycle) => <option key={cycle}>{cycle}</option>)}</select></div></label>
+            <label><span>قائد الفريق</span><div className="filter-control"><Users /><select value={detailTeamLead} onChange={(event) => { setDetailTeamLead(event.target.value); setPage(1); }}><option value="الكل">كل قادة الفرق</option>{availableTeamLeads.map((name) => <option key={name}>{name}</option>)}</select></div></label>
+            <label><span>المستفيد</span><div className="filter-control"><Users /><select value={detailBeneficiary} onChange={(event) => { setDetailBeneficiary(event.target.value); setPage(1); }}><option value="الكل">كل المستفيدين</option>{availableBeneficiaries.map((name) => <option key={name}>{name}</option>)}</select></div></label>
+            <label><span>أقل تكلفة</span><div className="filter-control"><CircleDollarSign /><input type="number" min="0" value={minimumPrice} onChange={(event) => { setMinimumPrice(event.target.value); setPage(1); }} placeholder="0" dir="ltr" /></div></label>
+            <label><span>أعلى تكلفة</span><div className="filter-control"><CircleDollarSign /><input type="number" min="0" value={maximumPrice} onChange={(event) => { setMaximumPrice(event.target.value); setPage(1); }} placeholder="بدون حد" dir="ltr" /></div></label>
+          </div>
+          <div className="filter-section-label"><span>الخدمات المشمولة</span><button type="button" onClick={() => { setSelectedServices([]); setPage(1); }} disabled={!selectedServices.length}>عرض الكل</button></div>
+          <div className="service-filter-list">{availableServices.map((service) => <label key={service} className={selectedServices.includes(service) ? "selected" : ""}><input type="checkbox" checked={selectedServices.includes(service)} onChange={(event) => { setSelectedServices((current) => event.target.checked ? [...current, service] : current.filter((value) => value !== service)); setPage(1); }} /><span className="filter-check"><Check /></span><span>{service}</span></label>)}</div>
+        </div> : null}
+        {hasAnyFilters ? <div className="active-filter-bar"><span>الفلاتر النشطة</span><div>
+          {detailSearch ? <button onClick={() => setDetailSearch("")}>بحث: {detailSearch}<X /></button> : null}
+          {from ? <button onClick={() => setFrom("")}>من {from}<X /></button> : null}
+          {to ? <button onClick={() => setTo("")}>إلى {to}<X /></button> : null}
+          {detailStatus !== "الكل" ? <button onClick={() => setDetailStatus("الكل")}>{statusLabel(detailStatus as Status)}<X /></button> : null}
+          {detailCycle !== "الكل" ? <button onClick={() => setDetailCycle("الكل")}>{detailCycle}<X /></button> : null}
+          {detailTeamLead !== "الكل" ? <button onClick={() => setDetailTeamLead("الكل")}>القائد: {detailTeamLead}<X /></button> : null}
+          {detailBeneficiary !== "الكل" ? <button onClick={() => setDetailBeneficiary("الكل")}>المستفيد: {detailBeneficiary}<X /></button> : null}
+          {selectedServices.map((service) => <button key={service} onClick={() => setSelectedServices((current) => current.filter((value) => value !== service))}>{service}<X /></button>)}
+          {(minimumPrice || maximumPrice) ? <button onClick={() => { setMinimumPrice(""); setMaximumPrice(""); }}>التكلفة {minimumPrice || "0"}–{maximumPrice || "∞"}<X /></button> : null}
+        </div><button className="clear-all-filters" type="button" onClick={clearAllFilters}>مسح الكل</button></div> : null}
       </section>
       <section className="panel report-details">
         <div className="panel-head">
           <div>
             <h2>تفاصيل الاشتراكات</h2>
-            <p>البيانات المطابقة للخدمات والفترة المحددة، جاهزة للمراجعة والتصدير.</p>
+            <p>رتّب النتائج واضغط على أي صف لعرض التفاصيل الكاملة.</p>
           </div>
-          <span className="result-count">{filteredItems.length} اشتراك</span>
+          <div className="table-head-actions"><label>عرض <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option>10</option><option>25</option><option>50</option></select></label><span className="result-count"><AnimatedNumber value={filteredItems.length} /> اشتراك</span></div>
         </div>
         <div className="data-table-wrap">
           <table className="data-table">
-            <thead><tr><th>الخدمة</th><th>التكلفة</th><th>الدورة</th><th>تاريخ انتهاء الاشتراك</th><th>الحالة</th><th>قائد الفريق</th><th>المستفيد</th></tr></thead>
+            <thead><tr><th><ReportSortButton label="الخدمة" field="name" activeField={sortField} direction={sortDirection} onSort={sortReport} /></th><th><ReportSortButton label="التكلفة" field="price" activeField={sortField} direction={sortDirection} onSort={sortReport} /></th><th><ReportSortButton label="الدورة" field="cycle" activeField={sortField} direction={sortDirection} onSort={sortReport} /></th><th><ReportSortButton label="تاريخ الانتهاء" field="renewal" activeField={sortField} direction={sortDirection} onSort={sortReport} /></th><th><ReportSortButton label="الحالة" field="status" activeField={sortField} direction={sortDirection} onSort={sortReport} /></th><th><ReportSortButton label="قائد الفريق" field="teamLead" activeField={sortField} direction={sortDirection} onSort={sortReport} /></th><th><ReportSortButton label="المستفيد" field="beneficiary" activeField={sortField} direction={sortDirection} onSort={sortReport} /></th></tr></thead>
             <tbody>
-              {filteredItems.map((item) => <tr key={item.id} className={item.status === "منتهٍ" ? "expired-row" : undefined}><td><strong>{item.name}</strong></td><td>{formatSAR(item.price)}</td><td>{item.cycle}</td><td dir="ltr">{item.renewal}</td><td><span className={cn("table-status", item.status === "منتهٍ" && "expired", item.status === "قارب على الانتهاء" && "near")}>{statusLabel(item.status)}</span></td><td>{item.teamLeadName ?? "—"}</td><td>{item.beneficiaryName ?? "—"}</td></tr>)}
+              {visibleItems.map((item, index) => <tr key={item.id} style={{ "--row-index": index } as React.CSSProperties} className={item.status === "منتهٍ" ? "expired-row" : undefined} role="button" tabIndex={0} onClick={() => setSelectedDetail(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedDetail(item); }}><td><div className="table-service"><ServiceLogo name={item.name} fallback={item.short} color={item.color} compact /><strong>{item.name}</strong></div></td><td>{formatSAR(item.price)}</td><td>{item.cycle}</td><td dir="ltr">{item.renewal}</td><td><span className={cn("table-status", item.status === "منتهٍ" && "expired", item.status === "قارب على الانتهاء" && "near")}>{statusLabel(item.status)}</span></td><td>{item.teamLeadName ?? "—"}</td><td>{item.beneficiaryName ?? "—"}</td></tr>)}
               {!filteredItems.length && <tr><td colSpan={7} className="table-empty">لا توجد اشتراكات مطابقة للفلاتر الحالية.</td></tr>}
             </tbody>
           </table>
         </div>
+        {filteredItems.length > pageSize ? <nav className="pagination report-pagination" aria-label="صفحات تفاصيل الاشتراكات"><button className="btn secondary compact" disabled={safePage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>السابق</button><span>صفحة {safePage} من {pages}</span><button className="btn secondary compact" disabled={safePage === pages} onClick={() => setPage((current) => Math.min(pages, current + 1))}>التالي</button></nav> : null}
+      </section>
+      <section className="report-insights" aria-label="أهم ملاحظات التقرير">
+        <article><span className="insight-icon high"><TrendingUp /></span><div><small>أعلى اشتراك تكلفة</small><strong>{highestCost ? highestCost.name : "—"}</strong><p>{highestCost ? formatSAR(highestCost.price) : "لا توجد بيانات"}</p></div></article>
+        <article><span className="insight-icon near"><Clock3 /></span><div><small>أقرب تاريخ انتهاء</small><strong>{nearestExpiry ? nearestExpiry.name : "—"}</strong><p>{nearestExpiry ? (nearestExpiry.days === 0 ? "ينتهي اليوم" : `متبقي ${nearestExpiry.days} أيام`) : "لا توجد تجديدات قريبة"}</p></div></article>
+        <article><span className="insight-icon month"><CircleDollarSign /></span><div><small>مطلوب خلال هذا الشهر</small><strong><AnimatedNumber value={Math.round(renewalThisMonth)} formatter={formatSAR} /></strong><p>قيمة الاشتراكات المستحقة</p></div></article>
       </section>
       <section className="metrics-grid">
         <Metric
           icon={CircleDollarSign}
           title="الإنفاق السنوي المتوقع"
-          value={formatSAR(annual)}
+          value={<AnimatedNumber value={annual} formatter={formatSAR} />}
           trend="تقدير سنوي حسب الاشتراكات الحالية"
           tone="green"
         />
         <Metric
           icon={WalletCards}
           title="متوسط الاشتراك"
-          value={formatSAR(average)}
+          value={<AnimatedNumber value={average} formatter={formatSAR} />}
           trend="متوسط شهري لكل خدمة"
         />
         <Metric
           icon={Activity}
           title="حالات الاشتراكات"
-          value={String(filteredItems.length)}
+          value={<AnimatedNumber value={filteredItems.length} />}
           trend={`نشط ${activeCount} · قريب ${nearCount} · منتهٍ ${expiredCount} · ملغى ${canceledCount}`}
           tone="orange"
         />
       </section>
-      <section className="panel report-chart">
-        <div className="panel-head">
-          <div>
-            <h2>الإنفاق حسب الشهر</h2>
-            <p>التكلفة الشهرية المعادلة وفق الدورات الحالية</p>
-          </div>
-        </div>
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart data={reportData}>
-            <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-            <XAxis dataKey="month" axisLine={false} tickLine={false} />
-            <YAxis hide />
-            <Tooltip formatter={(v) => formatSAR(Number(v))} />
-            <Bar
-              dataKey="value"
-              fill="#2ac0eb"
-              radius={[8, 8, 0, 0]}
-              maxBarSize={50}
-            />
-          </BarChart>
-        </ResponsiveContainer>
+      <section className="report-analytics-grid">
+        <article className="panel report-chart"><div className="panel-head"><div><h2>تكلفة الخدمات شهريًا</h2><p>أعلى الخدمات حسب التكلفة الشهرية المعادلة</p></div></div><ResponsiveContainer width="100%" height={300}><BarChart data={costByService} layout="vertical" margin={{ right: 10, left: 10 }}><CartesianGrid horizontal={false} stroke="var(--chart-grid)" /><XAxis type="number" hide /><YAxis type="category" dataKey="name" axisLine={false} tickLine={false} width={95} tick={{ fill: "var(--muted)", fontSize: 10 }} /><Tooltip formatter={(value) => formatSAR(Number(value))} /><Bar dataKey="value" fill="#20b7df" radius={[8, 0, 0, 8]} maxBarSize={24} animationDuration={520} /></BarChart></ResponsiveContainer></article>
+        <article className="panel report-chart"><div className="panel-head"><div><h2>التجديدات القادمة</h2><p>المبالغ المستحقة خلال الأشهر الستة المقبلة</p></div></div><ResponsiveContainer width="100%" height={300}><BarChart data={renewalForecast}><CartesianGrid vertical={false} stroke="var(--chart-grid)" /><XAxis dataKey="month" axisLine={false} tickLine={false} /><YAxis hide /><Tooltip formatter={(value) => formatSAR(Number(value))} /><Bar dataKey="value" fill="#7357ff" radius={[8, 8, 0, 0]} maxBarSize={42} animationDuration={520} /></BarChart></ResponsiveContainer></article>
       </section>
+      <Dialog.Root open={Boolean(selectedDetail)} onOpenChange={(open) => !open && setSelectedDetail(null)}>
+        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="report-detail-drawer" dir="rtl">
+          <div className="drawer-service"><ServiceLogo name={selectedDetail?.name ?? ""} fallback={selectedDetail?.short} color={selectedDetail?.color} /><div><Dialog.Title>{selectedDetail?.name}</Dialog.Title><Dialog.Description>تفاصيل الاشتراك ضمن التقرير الحالي</Dialog.Description></div><StatusBadge status={selectedDetail?.status ?? "نشط"} /></div>
+          <div className="drawer-highlight"><span>التكلفة</span><strong>{formatSAR(selectedDetail?.price ?? 0)}</strong><small>{selectedDetail?.cycle}</small></div>
+          <dl className="drawer-details"><div><dt>تاريخ انتهاء الاشتراك</dt><dd dir="ltr">{selectedDetail?.renewal}</dd></div><div><dt>قائد الفريق</dt><dd>{selectedDetail?.teamLeadName ?? "غير محدد"}</dd></div><div><dt>المستفيد</dt><dd>{selectedDetail?.beneficiaryName ?? "غير محدد"}</dd></div><div><dt>التصنيف</dt><dd>{selectedDetail?.category ?? "غير مصنف"}</dd></div><div><dt>الباقة</dt><dd>{selectedDetail?.requestedPlan ?? "غير محددة"}</dd></div><div><dt>التكلفة الشهرية المعادلة</dt><dd>{selectedDetail ? formatSAR(Math.round(monthlyEquivalent(selectedDetail))) : "—"}</dd></div></dl>
+          <Dialog.Close className="dialog-close" aria-label="إغلاق"><X /></Dialog.Close>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>
     </>
   );
 }
