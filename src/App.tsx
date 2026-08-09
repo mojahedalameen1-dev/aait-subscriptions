@@ -67,6 +67,7 @@ import {
 } from "./lib/service-catalog";
 import {
   firebaseReady,
+  getAuthErrorMessage,
   signInWithGoogle,
   signOutUser,
   watchAuth,
@@ -2782,8 +2783,9 @@ function LoginScreen({ theme, onToggleTheme }: { theme: "light" | "dark"; onTogg
             setLoading(true);
             try {
               await signInWithGoogle();
-            } catch {
-              toast.error("تعذر تسجيل الدخول. تحقق من إعدادات Firebase.");
+            } catch (error) {
+              console.error("Firebase sign-in failed", error);
+              toast.error(getAuthErrorMessage(error));
               setLoading(false);
             }
           }}
